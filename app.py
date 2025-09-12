@@ -224,7 +224,7 @@ class TelemetryApp(QMainWindow):
 
     def _setup_3d_model(self):
         try:
-            mesh = pv.read("planeLight.stl")
+            mesh = pv.read("fulllight.stl")
         except Exception as e:
             print(f"3Dモデルの読み込みに失敗しました: {e}")
             mesh = pv.Sphere(radius=1.0)
