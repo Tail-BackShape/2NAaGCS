@@ -1,74 +1,110 @@
-
 import sys
 import serial
 import serial.tools.list_ports
 import threading
 import queue
 import math
+import socket
+import cv2
+import numpy as np
+import requests
 import pyvista as pv
 from pyvistaqt import QtInteractor
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QGroupBox, QFormLayout, QComboBox, QPushButton, QLabel, QGridLayout
+    QGroupBox, QFormLayout, QComboBox, QPushButton, QLabel, QGridLayout, QLineEdit
 )
-from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPolygonF
-from PySide6.QtCore import Qt, QTimer, QPointF, QRectF
+from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPolygonF, QImage, QPixmap
+from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, QThread, Signal, Slot
 
 pv.set_plot_theme("dark")
 
+# --- Video Worker Thread ---
+class VideoWorker(QThread):
+    change_pixmap_signal = Signal(np.ndarray)
+    error_signal = Signal(str)
+
+    def __init__(self, url):
+        super().__init__()
+        self.url = url
+        self._running = True
+
+    def run(self):
+        try:
+            with requests.get(self.url, stream=True, timeout=5) as r:
+                if r.status_code != 200:
+                    self.error_signal.emit(f"HTTPエラー {r.status_code}")
+                    return
+
+                self.error_signal.emit("ストリームに接続しました。")
+                bytes_buffer = b''
+                for chunk in r.iter_content(chunk_size=4096):
+                    if not self._running:
+                        break
+                    bytes_buffer += chunk
+                    a = bytes_buffer.find(b'\xff\xd8') # JPEGの開始マーカー
+                    b = bytes_buffer.find(b'\xff\xd9') # JPEGの終了マーカー
+                    if a != -1 and b != -1:
+                        jpg = bytes_buffer[a:b+2]
+                        bytes_buffer = bytes_buffer[b+2:]
+                        
+                        frame = cv2.imdecode(np.frombuffer(jpg, dtype=np.uint8), cv2.IMREAD_COLOR)
+                        if frame is not None:
+                            self.change_pixmap_signal.emit(frame)
+            
+            if self._running:
+                self.error_signal.emit("ストリームが予期せず終了しました。")
+
+        except requests.exceptions.RequestException as e:
+            self.error_signal.emit(f"接続エラー: {e}")
+        except Exception as e:
+            self.error_signal.emit(f"不明なエラー: {e}")
+
+    def stop(self):
+        self._running = False
+        self.wait()
+
+# --- Custom UI Widgets (Omitted for brevity) ---
 class ADIWidget(QWidget):
-    """姿勢指示器（ADI）を描画するカスタムウィジェット"""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumSize(200, 200)
         self._roll = 0
         self._pitch = 0
-
     def set_attitude(self, roll, pitch):
         self._roll = roll
         self._pitch = pitch
         self.update()
-
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
         size = min(self.width(), self.height())
         painter.translate(self.width() / 2, self.height() / 2)
         painter.scale(size / 200.0, size / 200.0)
-
         painter.setPen(Qt.NoPen)
         painter.setBrush(QColor("#2b2b2b"))
         painter.drawRect(-100, -100, 200, 200)
-
         painter.save()
-
         pitch_offset = self._pitch * 2
         painter.translate(0, pitch_offset)
         painter.rotate(-self._roll)
-
         sky_color = QColor("#3282F6")
         ground_color = QColor("#8B4513")
-
         painter.setPen(Qt.NoPen)
         painter.setBrush(sky_color)
         painter.drawRect(-300, -300, 600, 300)
         painter.setBrush(ground_color)
         painter.drawRect(-300, 0, 600, 300)
-
         painter.setPen(QPen(Qt.white, 2))
         painter.drawLine(-300, 0, 300, 0)
-
         painter.restore()
-
         painter.setPen(QPen(QColor("yellow"), 3))
         painter.drawLine(-50, 0, -10, 0)
         painter.drawLine(10, 0, 50, 0)
         painter.drawLine(0, -5, 0, 5)
 
 class StickWidget(QWidget):
-    """プロポのスティックを描画するカスタムウィジェット"""
     def __init__(self, x_label, y_label, parent=None):
         super().__init__(parent)
         self.setFixedSize(120, 120)
@@ -76,45 +112,44 @@ class StickWidget(QWidget):
         self._y_label = y_label
         self._x = 0
         self._y = 0
-
     def set_position(self, x, y):
         self._x = x
         self._y = y
         self.update()
-
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
         painter.setBrush(QColor("#2b2b2b"))
         painter.setPen(QColor("gray"))
         painter.drawRect(0, 0, self.width()-1, self.height()-1)
-
         pen = QPen(QColor("gray"), 1, Qt.DashLine)
         painter.setPen(pen)
         painter.drawLine(self.width()/2, 5, self.width()/2, self.height()-5)
         painter.drawLine(5, self.height()/2, self.width()-5, self.height()/2)
-
         painter.setPen(QColor("white"))
         painter.drawText(QRectF(0, 0, self.width(), 15), Qt.AlignCenter, self._y_label)
         painter.drawText(QRectF(self.width() - 35, 0, 35, self.height()), Qt.AlignCenter, self._x_label)
-
         center_x = self.width()/2 + self._x * (self.width()/2 - 10)
         center_y = self.height()/2 - self._y * (self.height()/2 - 10)
         painter.setBrush(QColor("cyan"))
         painter.setPen(QColor("white"))
         painter.drawEllipse(QPointF(center_x, center_y), 5, 5)
 
-
+# --- Main Application Window ---
 class TelemetryApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("RC Telemetry Display (PySide6)")
-        self.setGeometry(100, 100, 1400, 800)
+        self.setGeometry(100, 100, 1600, 900)
 
         self.serial_connection = None
         self.is_connected = False
         self.data_queue = queue.Queue()
+        self.video_thread = None
+
+        self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        self.udp_broadcast_address = ('<broadcast>', 12345)
 
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
@@ -125,23 +160,24 @@ class TelemetryApp(QMainWindow):
         main_layout.addWidget(left_panel, 1)
 
         right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
+        self.right_layout = QVBoxLayout(right_panel)
         main_layout.addWidget(right_panel, 3)
 
         left_layout.addWidget(self._create_connection_group())
         left_layout.addWidget(self._create_instrument_group())
         left_layout.addWidget(self._create_stick_group())
+        left_layout.addWidget(self._create_video_group())
         left_layout.addStretch(1)
-
+        
         self.plotter = QtInteractor(right_panel)
-        right_layout.addWidget(self.plotter.interactor)
+        self.right_layout.addWidget(self.plotter.interactor, 2)
+        self._setup_video_display()
         self._setup_3d_model()
 
         self.update_com_ports()
-
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.process_serial_queue)
-        self.timer.start(50)
+        self.telemetry_timer = QTimer(self)
+        self.telemetry_timer.timeout.connect(self.process_serial_queue)
+        self.telemetry_timer.start(50)
 
     @staticmethod
     def normalize_value(value, min_in, max_in, min_out=-1.0, max_out=1.0):
@@ -162,34 +198,27 @@ class TelemetryApp(QMainWindow):
     def _create_connection_group(self):
         group = QGroupBox("シリアル接続")
         layout = QGridLayout()
-
         self.com_port_combo = QComboBox()
         self.refresh_button = QPushButton("更新")
         self.connect_button = QPushButton("接続")
-
         layout.addWidget(QLabel("COMポート:"), 0, 0)
         layout.addWidget(self.com_port_combo, 0, 1)
         layout.addWidget(self.refresh_button, 0, 2)
         layout.addWidget(self.connect_button, 1, 0, 1, 3)
-
         self.refresh_button.clicked.connect(self.update_com_ports)
         self.connect_button.clicked.connect(self.toggle_connection)
-
         group.setLayout(layout)
         return group
 
     def _create_instrument_group(self):
         group = QGroupBox("計器")
         main_layout = QVBoxLayout()
-
         self.adi_widget = ADIWidget()
         self.altitude_label = QLabel("高度: 0.0 m")
         self.heading_label = QLabel("方位: 0.0 °")
-
         main_layout.addWidget(self.adi_widget, 0, Qt.AlignCenter)
         main_layout.addWidget(self.altitude_label)
         main_layout.addWidget(self.heading_label)
-
         aux_group = QGroupBox("AUXスイッチ")
         aux_layout = QHBoxLayout()
         self.aux_labels = []
@@ -201,38 +230,90 @@ class TelemetryApp(QMainWindow):
             aux_layout.addWidget(label)
         aux_group.setLayout(aux_layout)
         main_layout.addWidget(aux_group)
-
         group.setLayout(main_layout)
         return group
 
     def _create_stick_group(self):
         group = QGroupBox("プロポ入力")
         layout = QGridLayout()
-
         self.left_stick = StickWidget("ラダー", "エレベーター")
         self.right_stick = StickWidget("エルロン", "スロットル")
         self.left_stick_label = QLabel("R: 0, E: 0")
         self.right_stick_label = QLabel("A: 0, T: 0")
-
         layout.addWidget(self.left_stick, 0, 0)
         layout.addWidget(self.right_stick, 0, 1)
         layout.addWidget(self.left_stick_label, 1, 0, Qt.AlignCenter)
         layout.addWidget(self.right_stick_label, 1, 1, Qt.AlignCenter)
-
         group.setLayout(layout)
         return group
 
+    def _create_video_group(self):
+        group = QGroupBox("ビデオストリーム")
+        layout = QGridLayout(group)
+        self.video_url_input = QLineEdit("http://192.168.0.10:8080/video")
+        self.video_toggle_button = QPushButton("配信開始")
+        self.video_toggle_button.clicked.connect(self.toggle_video_stream)
+        layout.addWidget(QLabel("URL:"), 0, 0)
+        layout.addWidget(self.video_url_input, 0, 1)
+        layout.addWidget(self.video_toggle_button, 1, 0, 1, 2)
+        return group
+
+    def _setup_video_display(self):
+        video_container = QWidget()
+        video_layout = QVBoxLayout(video_container)
+        video_layout.setContentsMargins(0,0,0,0)
+        self.video_label = QLabel()
+        self.video_label.setAlignment(Qt.AlignCenter)
+        self.video_label.setStyleSheet("background-color: black; color: white;")
+        self.video_label.setText("ビデオストリーム停止中")
+        self.video_status_label = QLabel("ステータス: 非アクティブ")
+        self.video_status_label.setFixedHeight(20)
+        video_layout.addWidget(self.video_label)
+        video_layout.addWidget(self.video_status_label)
+        self.right_layout.addWidget(video_container, 1)
+
     def _setup_3d_model(self):
         try:
-            mesh = pv.read("fulllight.stl")
-        except Exception as e:
-            print(f"3Dモデルの読み込みに失敗しました: {e}")
-            mesh = pv.Sphere(radius=1.0)
-
+            mesh = pv.read("plane.stl")
+        except FileNotFoundError:
+            mesh = pv.read("placeholder_cube.stl")
         self.plane_actor = self.plotter.add_mesh(mesh, smooth_shading=True)
         self.plotter.view_isometric()
         self.plotter.add_axes()
         self.plotter.enable_zoom_style()
+
+    def toggle_video_stream(self):
+        if self.video_thread and self.video_thread.isRunning():
+            self.video_thread.stop()
+            self.video_toggle_button.setText("配信開始")
+            self.video_status_label.setText("ステータス: ユーザーにより停止")
+            self.video_url_input.setEnabled(True)
+        else:
+            url = self.video_url_input.text()
+            self.video_thread = VideoWorker(url)
+            self.video_thread.change_pixmap_signal.connect(self.update_video_image)
+            self.video_thread.error_signal.connect(self.update_video_status)
+            self.video_thread.start()
+            self.video_toggle_button.setText("配信停止")
+            self.video_status_label.setText("ステータス: 接続試行中...")
+            self.video_url_input.setEnabled(False)
+
+    @Slot(np.ndarray)
+    def update_video_image(self, cv_img):
+        qt_img = self.convert_cv_qt(cv_img)
+        self.video_label.setPixmap(qt_img)
+
+    @Slot(str)
+    def update_video_status(self, status_text):
+        self.video_status_label.setText(f"ステータス: {status_text}")
+
+    def convert_cv_qt(self, cv_img):
+        rgb_image = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
+        h, w, ch = rgb_image.shape
+        bytes_per_line = ch * w
+        convert_to_Qt_format = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        p = QPixmap.fromImage(convert_to_Qt_format)
+        return p.scaled(420, 320, Qt.KeepAspectRatio)
 
     def update_com_ports(self):
         self.com_port_combo.clear()
@@ -287,38 +368,32 @@ class TelemetryApp(QMainWindow):
 
     def parse_and_update_ui(self, line):
         try:
+            try:
+                self.udp_socket.sendto(line.encode('utf-8'), self.udp_broadcast_address)
+            except Exception as e:
+                print(f"UDP送信エラー: {e}")
             parts = [float(p) for p in line.split(',')]
             if len(parts) == 18:
                 roll, pitch, yaw, alt, ail, elev, thro, rudd, aux1, aux2, aux3, aux4, *_ = parts
-
                 if self.plane_actor:
                     self.plane_actor.SetOrientation(0, 0, 0)
                     self.plane_actor.RotateZ(yaw)
                     self.plane_actor.RotateY(pitch)
                     self.plane_actor.RotateX(roll)
-
                 self.adi_widget.set_attitude(roll, pitch)
                 self.altitude_label.setText(f"高度: {alt:.1f} m")
                 self.heading_label.setText(f"方位: {yaw:.1f} °")
-
                 self.update_aux_switches([aux1, aux2, aux3, aux4])
-
-                # 新しい範囲と中心点で正規化し、UIを更新
-                # 左スティック: ラダー(X), エレベーター(Y)
                 rud_norm = self.normalize_symmetrical(rudd, 830, 1148, 1500)
                 ele_norm = self.normalize_symmetrical(elev, 800, 966, 1070)
-                # 表示方向を反転
                 rud_norm = -rud_norm
                 ele_norm = -ele_norm
                 self.left_stick.set_position(rud_norm, ele_norm)
                 self.left_stick_label.setText(f"R: {int(rudd)}, E: {int(elev)}")
-
-                # 右スティック: エルロン(X), スロットル(Y)
                 ail_norm = self.normalize_symmetrical(ail, 560, 1164, 1750)
-                thr_norm = self.normalize_value(thro, 360, 1590) # スロットルは-1から1に
+                thr_norm = self.normalize_value(thro, 360, 1590)
                 self.right_stick.set_position(ail_norm, thr_norm)
                 self.right_stick_label.setText(f"A: {int(ail)}, T: {int(thro)}")
-
         except (ValueError, IndexError) as e:
             print(f"データ解析エラー: {e} - {line}")
 
@@ -335,9 +410,12 @@ class TelemetryApp(QMainWindow):
                 label.setStyleSheet(off_style)
 
     def closeEvent(self, event):
+        if self.video_thread and self.video_thread.isRunning():
+            self.video_thread.stop()
         self.is_connected = False
         if self.serial_connection and self.serial_connection.is_open:
             self.serial_connection.close()
+        self.udp_socket.close()
         self.plotter.close()
         event.accept()
 
