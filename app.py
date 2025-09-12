@@ -152,27 +152,36 @@ class Attitude2DWidget(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
-        rect = self.rect()
-        painter.fillRect(rect, QColor("#2b2b2b"))
+        widget_rect = self.rect()
+        painter.fillRect(widget_rect, QColor("#2b2b2b"))
 
         if not self.pixmap.isNull():
-            # ウィジェットの中央に画像を配置
-            w, h = self.pixmap.width(), self.pixmap.height()
-            target_rect = QRectF(
-                (rect.width() - w) / 2,
-                (rect.height() - h) / 2,
-                w,
-                h
+            # 1. 画像が回転しても収まるようにスケーリング計算
+            # 画像の対角線の長さがウィジェットの短辺に収まるようにする
+            img_diagonal = math.sqrt(self.pixmap.width()**2 + self.pixmap.height()**2)
+            widget_min_side = min(widget_rect.width(), widget_rect.height())
+
+            # パディングを少し加える
+            scale_factor = (widget_min_side * 0.9) / img_diagonal if img_diagonal > 0 else 1.0
+
+            scaled_pixmap = self.pixmap.scaled(
+                int(self.pixmap.width() * scale_factor),
+                int(self.pixmap.height() * scale_factor),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
             )
 
-            # 画像を回転
+            # 2. 回転と描画
             transform = QTransform()
-            transform.translate(target_rect.center().x(), target_rect.center().y())
+            # ウィジェットの中心に移動
+            transform.translate(widget_rect.center().x(), widget_rect.center().y())
+            # 回転
             transform.rotate(self._angle)
-            transform.translate(-target_rect.center().x(), -target_rect.center().y())
-            painter.setTransform(transform)
+            # 画像の中心が原点に来るように移動
+            transform.translate(-scaled_pixmap.width() / 2, -scaled_pixmap.height() / 2)
 
-            painter.drawPixmap(target_rect.toRect(), self.pixmap)
+            painter.setTransform(transform)
+            painter.drawPixmap(0, 0, scaled_pixmap)
 
 # --- Main Application Window ---
 class TelemetryApp(QMainWindow):
@@ -208,10 +217,10 @@ class TelemetryApp(QMainWindow):
         left_layout.addWidget(self._create_video_group())
         left_layout.addStretch(1)
 
-        # 2D姿勢表示ウィジェットをセットアップ
-        self._setup_2d_attitude_display(right_panel)
         # ビデオ表示ウィジェットをセットアップ
         self._setup_video_display()
+        # 2D姿勢表示ウィジェットをセットアップ
+        self._setup_2d_attitude_display(right_panel)
 
         self.update_com_ports()
 
@@ -260,9 +269,15 @@ class TelemetryApp(QMainWindow):
         self.adi_widget = ADIWidget()
         self.altitude_label = QLabel("高度: 0.0 m")
         self.heading_label = QLabel("方位: 0.0 °")
+        self.mission_status_label = QLabel("ミッション: なし")
+        self.mission_status_label.setAlignment(Qt.AlignCenter)
+        self.mission_status_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #FFD700; padding: 5px;")
+
         main_layout.addWidget(self.adi_widget, 0, Qt.AlignCenter)
         main_layout.addWidget(self.altitude_label)
         main_layout.addWidget(self.heading_label)
+        main_layout.addWidget(self.mission_status_label)
+
         aux_group = QGroupBox("AUXスイッチ")
         aux_layout = QHBoxLayout()
         self.aux_labels = []
@@ -461,14 +476,29 @@ class TelemetryApp(QMainWindow):
     def update_aux_switches(self, aux_values):
         on_style = "background-color: #28a745; color: white; padding: 5px; border-radius: 3px;"
         off_style = "background-color: #555; color: white; padding: 5px; border-radius: 3px;"
+
+        mission_text = "なし"
+        missions = {
+            1: "水平旋回",  # AUX2
+            2: "上昇旋回",  # AUX3
+            3: "八の字旋回" # AUX4
+        }
+
         for i, value in enumerate(aux_values):
             label = self.aux_labels[i]
-            if value > 1100:
+            is_on = value > 1100
+
+            if is_on:
                 label.setText(f"AUX{i+1}: ON")
                 label.setStyleSheet(on_style)
+                # i は 0-3, missionsのキーは 1-3
+                if i in missions:
+                    mission_text = missions[i]
             else:
                 label.setText(f"AUX{i+1}: OFF")
                 label.setStyleSheet(off_style)
+
+        self.mission_status_label.setText(f"ミッション: {mission_text}")
 
     def closeEvent(self, event):
         if self.video_thread and self.video_thread.isRunning():
