@@ -1,0 +1,4 @@
+customtkinter
+pyvista
+pyserial
+Pillow
