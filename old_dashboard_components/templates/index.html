@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RC Telemetry Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>RC Telemetry Dashboard</h1>
+        </header>
+
+        <main>
+            <div class="panel telemetry-data">
+                <h2>Telemetry Data</h2>
+                <p>Roll: <span id="roll">0.0</span>°</p>
+                <p>Pitch: <span id="pitch">0.0</span>°</p>
+                <p>Yaw: <span id="yaw">0.0</span>°</p>
+                <p>Altitude: <span id="altitude">0.0</span> m</p>
+                <div class="aux-switches">
+                    <span id="aux1" class="aux-label">AUX1: OFF</span>
+                    <span id="aux2" class="aux-label">AUX2: OFF</span>
+                    <span id="aux3" class="aux-label">AUX3: OFF</span>
+                    <span id="aux4" class="aux-label">AUX4: OFF</span>
+                </div>
+            </div>
+
+            <div class="panel instruments">
+                <h2>Instruments</h2>
+                <div class="instrument-row">
+                    <canvas id="adiCanvas" width="200" height="200"></canvas>
+                    <canvas id="leftStickCanvas" width="120" height="120"></canvas>
+                    <canvas id="rightStickCanvas" width="120" height="120"></canvas>
+                </div>
+            </div>
+
+            <div class="panel video-feeds">
+                <h2>Video Feeds</h2>
+                <div class="video-row">
+                    <div class="video-feed">
+                        <h3>3D Model View</h3>
+                        <img id="model3dStream" src="http://127.0.0.1:5001/" alt="3D Model Stream">
+                    </div>
+                    <div class="video-feed">
+                        <h3>Drone Camera</h3>
+                        <div class="camera-url-control">
+                            <input type="text" id="cameraUrlInput" placeholder="Enter camera URL (e.g., http://192.168.0.10:8080/video)">
+                            <button id="setCameraUrlBtn">Set URL</button>
+                        </div>
+                        <img id="droneCameraStream" src="" alt="Drone Camera Stream">
+                    </div>
+                </div>
+            </div>
+        <div class="panel com-port-control">
+                <h2>Telemetry Gateway Control</h2>
+                <div class="com-port-selector">
+                    <label for="comPortSelect">Select COM Port:</label>
+                    <select id="comPortSelect">
+                        <!-- Options will be populated by JavaScript -->
+                    </select>
+                    <button id="connectComPortBtn">Connect</button>
+                </div>
+                <p id="comPortStatus" class="status-message"></p>
+            </div>
+        </main>
+
+        <footer>
+            <p>&copy; 2025 RC Telemetry</p>
+        </footer>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.min.js"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>
