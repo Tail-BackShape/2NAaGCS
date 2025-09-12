@@ -8,17 +8,16 @@ import socket
 import cv2
 import numpy as np
 import requests
-import pyvista as pv
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QGroupBox, QFormLayout, QComboBox, QPushButton, QLabel, QGridLayout, QLineEdit
+    QGroupBox, QFormLayout, QComboBox, QPushButton, QLabel, QGridLayout, QLineEdit, QCheckBox
 )
-from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPolygonF, QImage, QPixmap
+from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPolygonF, QImage, QPixmap, QTransform
 from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, QThread, Signal, Slot
 
 # QtInteractorは必要時にのみインポート
-QtInteractor = None
+# QtInteractor = None
 
 # --- Video Worker Thread ---
 class VideoWorker(QThread):
@@ -135,6 +134,46 @@ class StickWidget(QWidget):
         painter.setPen(QColor("white"))
         painter.drawEllipse(QPointF(center_x, center_y), 5, 5)
 
+class Attitude2DWidget(QWidget):
+    def __init__(self, image_path, parent=None):
+        super().__init__(parent)
+        self.setMinimumSize(150, 150)
+        self.pixmap = QPixmap(image_path)
+        if self.pixmap.isNull():
+            print(f"画像の読み込みに失敗: {image_path}")
+        self._angle = 0
+
+    def set_angle(self, angle):
+        self._angle = angle
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
+        rect = self.rect()
+        painter.fillRect(rect, QColor("#2b2b2b"))
+
+        if not self.pixmap.isNull():
+            # ウィジェットの中央に画像を配置
+            w, h = self.pixmap.width(), self.pixmap.height()
+            target_rect = QRectF(
+                (rect.width() - w) / 2,
+                (rect.height() - h) / 2,
+                w,
+                h
+            )
+
+            # 画像を回転
+            transform = QTransform()
+            transform.translate(target_rect.center().x(), target_rect.center().y())
+            transform.rotate(self._angle)
+            transform.translate(-target_rect.center().x(), -target_rect.center().y())
+            painter.setTransform(transform)
+
+            painter.drawPixmap(target_rect.toRect(), self.pixmap)
+
 # --- Main Application Window ---
 class TelemetryApp(QMainWindow):
     def __init__(self):
@@ -169,15 +208,10 @@ class TelemetryApp(QMainWindow):
         left_layout.addWidget(self._create_video_group())
         left_layout.addStretch(1)
 
-        # 3D表示の初期化を遅延（QApplicationが確実に存在してから）
-        self.plotter = None
-        self.has_3d_display = False
-        self.plane_actor = None
-
+        # 2D姿勢表示ウィジェットをセットアップ
+        self._setup_2d_attitude_display(right_panel)
+        # ビデオ表示ウィジェットをセットアップ
         self._setup_video_display()
-
-        # QTimerを使って3D表示を遅延初期化
-        QTimer.singleShot(100, self._delayed_3d_setup)
 
         self.update_com_ports()
 
@@ -186,9 +220,8 @@ class TelemetryApp(QMainWindow):
         self.telemetry_timer.timeout.connect(self.process_serial_queue)
         self.telemetry_timer.start(50)  # 20Hz: UI表示用
 
-        # 3D表示用の姿勢データバッファ
+        # 姿勢データバッファ
         self.latest_attitude = {'roll': 0, 'pitch': 0, 'yaw': 0}
-        self.enable_3d_display = self.has_3d_display
 
     @staticmethod
     def normalize_value(value, min_in, max_in, min_out=-1.0, max_out=1.0):
@@ -283,68 +316,35 @@ class TelemetryApp(QMainWindow):
         video_layout.addWidget(self.video_status_label)
         self.right_layout.addWidget(video_container, 1)
 
-    def _delayed_3d_setup(self):
-        """3D表示の遅延初期化"""
-        global QtInteractor
-        try:
-            # QtInteractorを必要時にのみインポート
-            if QtInteractor is None:
-                from pyvistaqt import QtInteractor
+    def _setup_2d_attitude_display(self, parent):
+        """2D姿勢表示ウィジェットをセットアップ"""
+        container = QGroupBox("2D姿勢表示")
+        layout = QHBoxLayout(container)
 
-            # QApplicationが完全に初期化された後に3D表示を設定
-            # 引数なしで初期化を試行
-            self.plotter = QtInteractor()
-            self.right_layout.addWidget(self.plotter.interactor, 2)
-            self.has_3d_display = True
-            print("3D表示の初期化に成功しました")
+        self.roll_widget = Attitude2DWidget("2NAa_roll.png")
+        self.pitch_widget = Attitude2DWidget("2NAa_pitch.png")
+        self.yaw_widget = Attitude2DWidget("2NAa_yaw.png")
 
-            # 3Dモデルをセットアップ
-            self._setup_3d_model()
+        layout.addWidget(self.roll_widget)
+        layout.addWidget(self.pitch_widget)
+        layout.addWidget(self.yaw_widget)
 
-            # 3D描画タイマーを開始
-            if hasattr(self, 'telemetry_timer'):  # テレメトリータイマーが既に存在する場合
-                self.render_3d_timer = QTimer(self)
-                self.render_3d_timer.timeout.connect(self.update_3d_display)
-                self.render_3d_timer.start(150)  # 6.7Hz: 3D描画用
+        self.right_layout.addWidget(container, 2)
 
-        except Exception as e:
-            print(f"3D表示の初期化に失敗: {e}")
-            # フォールバック：3D表示なしのラベル
-            fallback_label = QLabel("3D表示は利用できません\n（PyVistaとPySide6の互換性問題）")
-            fallback_label.setAlignment(Qt.AlignCenter)
-            fallback_label.setStyleSheet("background-color: #2b2b2b; color: white; padding: 20px;")
-            self.right_layout.addWidget(fallback_label, 2)
-            self.plotter = None
-            self.has_3d_display = False
+        # 2D表示更新用のタイマー
+        self.attitude_2d_timer = QTimer(self)
+        self.attitude_2d_timer.timeout.connect(self.update_2d_attitude)
+        self.attitude_2d_timer.start(100) # 10Hz
 
-    def _setup_3d_model(self):
-        """3Dモデルのセットアップ（3D表示が利用可能な場合のみ）"""
-        if not self.has_3d_display or not self.plotter:
-            print("3D表示が利用できないため、3Dモデルの読み込みをスキップします")
-            return
+    def update_2d_attitude(self):
+        """2D姿勢表示を更新"""
+        roll = self.latest_attitude.get('roll', 0)
+        pitch = self.latest_attitude.get('pitch', 0)
+        yaw = self.latest_attitude.get('yaw', 0)
 
-        try:
-            # 軽量化されたSTLファイルを優先使用
-            try:
-                mesh = pv.read("planeLight_light.stl")
-                print("軽量化STLファイルを使用します")
-            except FileNotFoundError:
-                mesh = pv.read("planeLight.stl")
-                print("標準STLファイルを使用します")
-        except FileNotFoundError:
-            try:
-                mesh = pv.read("plane.stl")
-            except FileNotFoundError:
-                mesh = pv.read("placeholder_cube.stl")
-                print("プレースホルダーCubeを使用します")
-
-        # メッシュ情報を表示
-        print(f"メッシュ情報: 頂点数={mesh.n_points}, ポリゴン数={mesh.n_cells}")
-
-        self.plane_actor = self.plotter.add_mesh(mesh, smooth_shading=True)
-        self.plotter.view_isometric()
-        self.plotter.add_axes()
-        self.plotter.enable_zoom_style()
+        self.roll_widget.set_angle(roll)
+        self.pitch_widget.set_angle(pitch)
+        self.yaw_widget.set_angle(yaw)
 
     def toggle_video_stream(self):
         if self.video_thread and self.video_thread.isRunning():
@@ -439,11 +439,8 @@ class TelemetryApp(QMainWindow):
             parts = [float(p) for p in line.split(',')]
             if len(parts) == 18:
                 roll, pitch, yaw, alt, ail, elev, thro, rudd, aux1, aux2, aux3, aux4, *_ = parts
-                if self.plane_actor:
-                    self.plane_actor.SetOrientation(0, 0, 0)
-                    self.plane_actor.RotateZ(yaw)
-                    self.plane_actor.RotateY(pitch)
-                    self.plane_actor.RotateX(roll)
+                # 姿勢データをバッファに保存
+                self.latest_attitude = {'roll': roll, 'pitch': pitch, 'yaw': yaw}
                 self.adi_widget.set_attitude(roll, pitch)
                 self.altitude_label.setText(f"高度: {alt:.1f} m")
                 self.heading_label.setText(f"方位: {yaw:.1f} °")
@@ -473,35 +470,6 @@ class TelemetryApp(QMainWindow):
                 label.setText(f"AUX{i+1}: OFF")
                 label.setStyleSheet(off_style)
 
-    def toggle_3d_display(self, enabled):
-        """3D表示の有効/無効を切り替え"""
-        if not self.has_3d_display:
-            return  # 3D表示が利用できない場合は何もしない
-
-        self.enable_3d_display = enabled
-        if enabled and hasattr(self, 'render_3d_timer'):
-            self.render_3d_timer.start(150)
-            if self.plotter:
-                self.plotter.show()
-        elif hasattr(self, 'render_3d_timer'):
-            self.render_3d_timer.stop()
-            if self.plotter:
-                self.plotter.hide()
-
-    def update_3d_display(self):
-        """3D表示を低頻度で更新"""
-        if not self.has_3d_display or not self.enable_3d_display or not self.plotter:
-            return
-
-        if hasattr(self, 'plane_actor') and self.plane_actor:
-            roll = self.latest_attitude['roll']
-            pitch = self.latest_attitude['pitch']
-            yaw = self.latest_attitude['yaw']
-            try:
-                self.plane_actor.SetOrientation(roll, pitch, yaw)
-            except Exception as e:
-                print(f"3D表示更新エラー: {e}")
-
     def closeEvent(self, event):
         if self.video_thread and self.video_thread.isRunning():
             self.video_thread.stop()
@@ -509,22 +477,10 @@ class TelemetryApp(QMainWindow):
         if self.serial_connection and self.serial_connection.is_open:
             self.serial_connection.close()
         self.udp_socket.close()
-        # 3D表示が利用可能な場合のみplotterを閉じる
-        if self.has_3d_display and self.plotter:
-            try:
-                self.plotter.close()
-            except Exception as e:
-                print(f"3D表示の終了処理でエラー: {e}")
         event.accept()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-
-    # QApplication作成後にPyVistaテーマを設定
-    try:
-        pv.set_plot_theme("dark")
-    except Exception as e:
-        print(f"PyVistaテーマ設定エラー: {e}")
 
     window = TelemetryApp()
     window.show()
