@@ -352,12 +352,13 @@ class TelemetryApp(QMainWindow):
     AUTOPILOT_PARAMS = [
         ("バンク角 (度)", "bank_angle", "20.0"),
         ("水平旋回判定角 (度)", "horizontal_turn_target", "760.0"),
-        ("上昇旋回判定角1 (度)", "ascending_turn_target1", "-760.0"),
+        ("上昇旋回判定角 (度)", "ascending_turn_target1", "-760.0"),
         ("八の字右旋回角 (度)", "figure8_right_target", "300.0"),
         ("八の字左旋回角 (度)", "figure8_left_target", "-320.0"),
         ("上昇前高度 (m)", "altitude_low", "2.5"),
         ("上昇後高度 (m)", "altitude_high", "5.0"),
-        ("自動操縦スロットル", "autopilot_throttle", "1300.0"),
+        ("自動スロットル標準", "autopilot_throttle", "1300.0"),
+        ("エルロン→ラダーミキシング", "aileron_rudder_mix", "0.3"),
     ]
 
     RC_RANGES = {
@@ -369,7 +370,7 @@ class TelemetryApp(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("RC Telemetry Display (PySide6)")
+        self.setWindowTitle("2NAa GCS")
         self.setGeometry(100, 100, 1600, 900)
 
         self.serial_connection = None
@@ -392,6 +393,10 @@ class TelemetryApp(QMainWindow):
         self.last_autopilot_commands = None
         self.previous_aux_values = [0, 0, 0, 0]
         self.latest_attitude = {'roll': 0, 'pitch': 0, 'yaw': 0, 'alt': 0}
+
+        # --- Figure-8 Mission State ---
+        self.figure8_phase = 0  # 0: 右旋回フェーズ, 1: 左旋回フェーズ
+        self.figure8_completed = False
 
         self._setup_ui()
         self.load_pid_gains() # Also initializes PID controllers
@@ -641,7 +646,7 @@ class TelemetryApp(QMainWindow):
         return group
 
     def _create_autopilot_panel(self):
-        group = QGroupBox("自動操縦係数調整")
+        group = QGroupBox("自動操縦操舵量計算ゲイン")
         layout = QFormLayout(group)
 
         for label, key, default_value in self.GAINS_TO_TUNE:
@@ -655,7 +660,7 @@ class TelemetryApp(QMainWindow):
         return group
 
     def _create_autopilot_param_panel(self):
-        group = QGroupBox("自動操縦パラメータ調整")
+        group = QGroupBox("自動操縦パラメータ")
         layout = QFormLayout(group)
 
         for label, key, default_value in self.AUTOPILOT_PARAMS:
@@ -704,7 +709,15 @@ class TelemetryApp(QMainWindow):
 
         self.roll_widget.set_angle(roll)
         self.pitch_widget.set_angle(pitch)
-        self.yaw_widget.set_angle(yaw)
+
+        # ヨー軸は累積角度で表示（自動操縦時のみ）
+        if self.autopilot_active:
+            # 自動操縦時は累積角度（mission_start_yaw + yaw_diff）で表示
+            cumulative_yaw = self.mission_start_yaw + self.yaw_diff
+            self.yaw_widget.set_angle(cumulative_yaw)
+        else:
+            # 手動操縦時は受信した値をそのまま表示
+            self.yaw_widget.set_angle(yaw)
 
         # 自動操縦状態を2Dウィジェットに反映
         self.roll_widget.set_autopilot_active(self.autopilot_active)
@@ -751,6 +764,14 @@ class TelemetryApp(QMainWindow):
             self.com_port_combo.addItem("ポートなし")
         else:
             self.com_port_combo.addItems(ports)
+            # COM22をデフォルトで選択
+            com22_index = -1
+            for i, port in enumerate(ports):
+                if port == "COM22":
+                    com22_index = i
+                    break
+            if com22_index >= 0:
+                self.com_port_combo.setCurrentIndex(com22_index)
 
     def toggle_connection(self):
         if not self.is_connected:
@@ -885,6 +906,8 @@ class TelemetryApp(QMainWindow):
                 mission_found = True
                 prev_val = self.previous_aux_values[aux_index]
                 if prev_val < 1100: # And it was previously OFF (rising edge)
+                    # AUX2,3,4スイッチが入った瞬間にyaw_diffをリセット
+                    self.yaw_diff = 0
                     self.start_mission(mission_map[aux_number])
                 break # Only handle one mission at a time
 
@@ -903,6 +926,11 @@ class TelemetryApp(QMainWindow):
         self.mission_start_altitude = self.latest_attitude.get('alt', 0)
         self.last_yaw = self.mission_start_yaw
         self.yaw_diff = 0
+
+        # 八の字旋回の状態をリセット
+        self.figure8_phase = 0  # 右旋回から開始
+        self.figure8_completed = False
+
         self.roll_pid.reset()
         self.pitch_pid.reset()
         self.alt_pid.reset()
@@ -962,7 +990,37 @@ class TelemetryApp(QMainWindow):
             horizontal_target = self.current_autopilot_params.get('horizontal_turn_target', 760)
             if abs(self.yaw_diff) > horizontal_target:
                 self.mission_status_label.setText("ミッション: 水平旋回 成功")
-        # ... other missions ...
+        elif self.active_mission_mode == 2: # Ascending Turn
+            # 上昇旋回時は負のバンク角（水平旋回と逆方向）
+            target_roll = -self.current_autopilot_params.get('bank_angle', 20)
+            ascending_target = abs(self.current_autopilot_params.get('ascending_turn_target1', -760))
+            if abs(self.yaw_diff) > ascending_target:
+                self.mission_status_label.setText("ミッション: 上昇旋回 成功")
+        elif self.active_mission_mode == 3: # Figure-8 Turn
+            # 八の字旋回：右旋回から入り、目標角到達で左バンクに切り替え
+            self.alt_pid.setpoint = self.mission_start_altitude
+
+            right_target = self.current_autopilot_params.get('figure8_right_target', 300)
+            left_target = self.current_autopilot_params.get('figure8_left_target', -320)
+            bank_angle = self.current_autopilot_params.get('bank_angle', 20)
+
+            if not self.figure8_completed:
+                if self.figure8_phase == 0:  # 右旋回フェーズ
+                    target_roll = bank_angle  # 正のバンク角（右バンク）
+                    if self.yaw_diff >= right_target:  # 右旋回目標角に到達
+                        self.figure8_phase = 1  # 左旋回フェーズに切り替え
+                        print(f"八の字旋回: 左旋回フェーズに切り替え (yaw_diff: {self.yaw_diff:.1f}°)")
+
+                elif self.figure8_phase == 1:  # 左旋回フェーズ
+                    target_roll = -bank_angle  # 負のバンク角（左バンク）
+                    # 左旋回目標角は負の値なので、yaw_diffがleft_target以下になったら完了
+                    if self.yaw_diff <= left_target:  # 左旋回目標角に到達
+                        self.figure8_completed = True
+                        self.mission_status_label.setText("ミッション: 八の字旋回 成功")
+                        print(f"八の字旋回: 完了 (yaw_diff: {self.yaw_diff:.1f}°)")
+            else:
+                # ミッション完了後は水平飛行
+                target_roll = 0
 
         target_pitch_from_alt = self.alt_pid.update(current_alt, dt)
         final_target_pitch = target_pitch_from_alt + target_pitch
@@ -972,13 +1030,38 @@ class TelemetryApp(QMainWindow):
         self.roll_pid.setpoint = target_roll
         ail_out = self.roll_pid.update(current_roll, dt)
 
-        rudd_out = 0
+        # エルロン→ラダーミキシング
+        aileron_rudder_mix_coef = self.current_autopilot_params.get('aileron_rudder_mix', 0.3)
+        rudd_out = ail_out * aileron_rudder_mix_coef
+
+        """
+        # デバッグ情報（必要に応じて）
+        if abs(ail_out) > 0.1:  # エルロン操作がある時のみログ出力
+            print(f"ミキシング: エルロン={ail_out:.3f}, ラダー={rudd_out:.3f}, 係数={aileron_rudder_mix_coef}")
+        """
 
         # 目標角度を2D表示に送信
         self.roll_widget.set_target_angle(target_roll)
         self.pitch_widget.set_target_angle(final_target_pitch)
-        # ヨーの目標角度は複雑なので、とりあえず現在のヨー差分を表示
-        target_yaw_display = self.mission_start_yaw + self.yaw_diff
+
+        # ヨーの目標角度はミッション成功判定角度
+        if self.active_mission_mode == 1:  # 水平旋回
+            horizontal_target = self.current_autopilot_params.get('horizontal_turn_target', 760)
+            target_yaw_display = self.mission_start_yaw + horizontal_target
+        elif self.active_mission_mode == 2:  # 上昇旋回
+            ascending_target = self.current_autopilot_params.get('ascending_turn_target1', -760)
+            target_yaw_display = self.mission_start_yaw + ascending_target
+        elif self.active_mission_mode == 3:  # 八の字旋回
+            if self.figure8_phase == 0:  # 右旋回フェーズ
+                figure8_target = self.current_autopilot_params.get('figure8_right_target', 300)
+                target_yaw_display = self.mission_start_yaw + figure8_target
+            else:  # 左旋回フェーズ
+                figure8_target = self.current_autopilot_params.get('figure8_left_target', -320)
+                target_yaw_display = self.mission_start_yaw + figure8_target
+        else:
+            # 手動操縦時は現在の累積角度
+            target_yaw_display = self.mission_start_yaw + self.yaw_diff
+
         self.yaw_widget.set_target_angle(target_yaw_display)
 
         # 自動操縦時の操作量をスティック表示に送信
