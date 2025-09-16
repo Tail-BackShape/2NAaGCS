@@ -7,5 +7,13 @@
     "pitch_d": "0.05",
     "yaw_p": "0.2",
     "yaw_i": "0.0",
-    "yaw_d": "0.0"
+    "yaw_d": "0.0",
+    "bank_angle": "20.0",
+    "horizontal_turn_target": "760.0",
+    "ascending_turn_target1": "-760.0",
+    "figure8_right_target": "300.0",
+    "figure8_left_target": "-320.0",
+    "altitude_low": "2.5",
+    "altitude_high": "5.0",
+    "autopilot_throttle": "700"
 }

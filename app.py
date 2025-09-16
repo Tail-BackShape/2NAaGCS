@@ -4,7 +4,6 @@ import serial.tools.list_ports
 import threading
 import queue
 import math
-import socket
 import cv2
 import numpy as np
 import requests
@@ -230,9 +229,19 @@ class Attitude2DWidget(QWidget):
         if self.pixmap.isNull():
             print(f"画像の読み込みに失敗: {image_path}")
         self._angle = 0
+        self._target_angle = None  # 目標角度（None = 非表示）
+        self._autopilot_active = False
 
     def set_angle(self, angle):
         self._angle = angle
+        self.update()
+
+    def set_target_angle(self, target_angle):
+        self._target_angle = target_angle
+        self.update()
+
+    def set_autopilot_active(self, active):
+        self._autopilot_active = active
         self.update()
 
     def paintEvent(self, event):
@@ -271,6 +280,42 @@ class Attitude2DWidget(QWidget):
             painter.setTransform(transform)
             painter.drawPixmap(0, 0, scaled_pixmap)
 
+            # 3. 目標角度の表示（自動操縦時のみ）
+            if self._autopilot_active and self._target_angle is not None:
+                painter.resetTransform()
+                center = widget_rect.center()
+                radius = widget_min_side * 0.4
+
+                # 目標角度のライン（赤色）
+                target_rad = math.radians(self._target_angle - 90)  # -90で上方向を0度とする
+                target_x = center.x() + radius * math.cos(target_rad)
+                target_y = center.y() + radius * math.sin(target_rad)
+
+                painter.setPen(QPen(QColor("red"), 3))
+                painter.drawLine(center.x(), center.y(), target_x, target_y)
+
+                # 現在角度のライン（緑色）
+                current_rad = math.radians(self._angle - 90)
+                current_x = center.x() + radius * 0.8 * math.cos(current_rad)
+                current_y = center.y() + radius * 0.8 * math.sin(current_rad)
+
+                painter.setPen(QPen(QColor("lime"), 2))
+                painter.drawLine(center.x(), center.y(), current_x, current_y)
+
+                # 角度値の表示
+                painter.setPen(QPen(QColor("white"), 1))
+                font = painter.font()
+                font.setPointSize(10)
+                painter.setFont(font)
+
+                text_rect = QRectF(5, 5, widget_rect.width() - 10, 30)
+                painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignTop,
+                               f"目標: {self._target_angle:.1f}°")
+
+                text_rect = QRectF(5, 25, widget_rect.width() - 10, 30)
+                painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignTop,
+                               f"現在: {self._angle:.1f}°")
+
 # --- Main Application Window ---
 class TelemetryApp(QMainWindow):
     GAINS_TO_TUNE = [
@@ -278,7 +323,19 @@ class TelemetryApp(QMainWindow):
         ("Pitch P", "pitch_p", "0.1"), ("Pitch I", "pitch_i", "0.01"), ("Pitch D", "pitch_d", "0.05"),
         ("Yaw P", "yaw_p", "0.2"), ("Yaw I", "yaw_i", "0.0"), ("Yaw D", "yaw_d", "0.0"),
     ]
-    
+
+    # 自動操縦パラメータ
+    AUTOPILOT_PARAMS = [
+        ("バンク角 (度)", "bank_angle", "20.0"),
+        ("水平旋回判定角 (度)", "horizontal_turn_target", "760.0"),
+        ("上昇旋回判定角1 (度)", "ascending_turn_target1", "-760.0"),
+        ("八の字右旋回角 (度)", "figure8_right_target", "300.0"),
+        ("八の字左旋回角 (度)", "figure8_left_target", "-320.0"),
+        ("上昇前高度 (m)", "altitude_low", "2.5"),
+        ("上昇後高度 (m)", "altitude_high", "5.0"),
+        ("自動操縦スロットル", "autopilot_throttle", "1300.0"),
+    ]
+
     RC_RANGES = {
         'ail': {'min_in': 560, 'center_in': 1164, 'max_in': 1750},
         'elev': {'min_in': 800, 'center_in': 966, 'max_in': 1070},
@@ -298,10 +355,8 @@ class TelemetryApp(QMainWindow):
         self.video_thread = None
         self.pid_gain_edits = {}
         self.current_pid_gains = {}
-
-        self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        self.udp_broadcast_address = ('<broadcast>', 12345)
+        self.autopilot_param_edits = {}
+        self.current_autopilot_params = {}
 
         # --- Autopilot State ---
         self.autopilot_active = False
@@ -316,6 +371,7 @@ class TelemetryApp(QMainWindow):
 
         self._setup_ui()
         self.load_pid_gains() # Also initializes PID controllers
+        self.load_autopilot_params() # Load autopilot parameters
         self._setup_timers()
         self.update_com_ports()
 
@@ -361,9 +417,11 @@ class TelemetryApp(QMainWindow):
 
         video_widget = self._setup_video_display()
         pid_panel = self._create_autopilot_panel()
+        autopilot_param_panel = self._create_autopilot_param_panel()
 
         top_right_layout.addWidget(video_widget)
         top_right_layout.addWidget(pid_panel)
+        top_right_layout.addWidget(autopilot_param_panel)
         top_right_layout.addStretch(1)
 
         self.right_layout.addWidget(top_right_widget, 1)
@@ -401,10 +459,10 @@ class TelemetryApp(QMainWindow):
                 value_str = self.pid_gain_edits[key].text()
                 self.current_pid_gains[key] = float(value_str)
                 gains_to_save[key] = value_str
-            
+
             with open("coef.txt", "w") as f:
                 json.dump(gains_to_save, f, indent=4)
-            
+
             print(f"PID gains updated and saved: {self.current_pid_gains}")
             self._init_pid_controllers()
         except ValueError as e:
@@ -416,7 +474,7 @@ class TelemetryApp(QMainWindow):
         try:
             with open("coef.txt", "r") as f:
                 gains = json.load(f)
-            
+
             for key, value in gains.items():
                 if key in self.pid_gain_edits:
                     self.pid_gain_edits[key].setText(str(value))
@@ -430,8 +488,59 @@ class TelemetryApp(QMainWindow):
             print(f"Using default PID gains: {self.current_pid_gains}")
         except Exception as e:
             print(f"PIDゲインの読み込み中にエラーが発生しました: {e}")
-        
+
         self._init_pid_controllers()
+
+    def update_and_save_autopilot_params(self):
+        params_to_save = {}
+        try:
+            for _, key, _ in self.AUTOPILOT_PARAMS:
+                value_str = self.autopilot_param_edits[key].text()
+                self.current_autopilot_params[key] = float(value_str)
+                params_to_save[key] = value_str
+
+            # Load existing coef.txt data and add autopilot params
+            existing_data = {}
+            try:
+                with open("coef.txt", "r") as f:
+                    existing_data = json.load(f)
+            except FileNotFoundError:
+                pass
+
+            existing_data.update(params_to_save)
+
+            with open("coef.txt", "w") as f:
+                json.dump(existing_data, f, indent=4)
+
+            print(f"Autopilot parameters updated and saved: {self.current_autopilot_params}")
+        except ValueError as e:
+            print(f"自動操縦パラメータの値が不正です: {e}")
+        except Exception as e:
+            print(f"自動操縦パラメータの保存中にエラーが発生しました: {e}")
+
+    def load_autopilot_params(self):
+        try:
+            with open("coef.txt", "r") as f:
+                params = json.load(f)
+
+            for key, value in params.items():
+                if key in self.autopilot_param_edits:
+                    self.autopilot_param_edits[key].setText(str(value))
+                    self.current_autopilot_params[key] = float(value)
+            print(f"Loaded autopilot parameters from coef.txt: {self.current_autopilot_params}")
+
+        except FileNotFoundError:
+            print("coef.txt not found, using default autopilot parameters.")
+            for _, key, default_value in self.AUTOPILOT_PARAMS:
+                self.current_autopilot_params[key] = float(default_value)
+            print(f"Using default autopilot parameters: {self.current_autopilot_params}")
+        except Exception as e:
+            print(f"自動操縦パラメータの読み込み中にエラーが発生しました: {e}")
+
+        # Set default values for parameters that aren't loaded
+        for _, key, default_value in self.AUTOPILOT_PARAMS:
+            if key not in self.current_autopilot_params:
+                self.current_autopilot_params[key] = float(default_value)
 
     def _create_connection_group(self):
         group = QGroupBox("シリアル接続")
@@ -521,6 +630,20 @@ class TelemetryApp(QMainWindow):
 
         return group
 
+    def _create_autopilot_param_panel(self):
+        group = QGroupBox("自動操縦パラメータ調整")
+        layout = QFormLayout(group)
+
+        for label, key, default_value in self.AUTOPILOT_PARAMS:
+            self.autopilot_param_edits[key] = QLineEdit(default_value)
+            layout.addRow(label, self.autopilot_param_edits[key])
+
+        update_button = QPushButton("パラメータ更新")
+        update_button.clicked.connect(self.update_and_save_autopilot_params)
+        layout.addRow(update_button)
+
+        return group
+
     def _setup_video_display(self):
         video_container = QWidget()
         video_layout = QVBoxLayout(video_container)
@@ -558,6 +681,11 @@ class TelemetryApp(QMainWindow):
         self.roll_widget.set_angle(roll)
         self.pitch_widget.set_angle(pitch)
         self.yaw_widget.set_angle(yaw)
+
+        # 自動操縦状態を2Dウィジェットに反映
+        self.roll_widget.set_autopilot_active(self.autopilot_active)
+        self.pitch_widget.set_autopilot_active(self.autopilot_active)
+        self.yaw_widget.set_autopilot_active(self.autopilot_active)
 
     def toggle_video_stream(self):
         if self.video_thread and self.video_thread.isRunning():
@@ -654,27 +782,23 @@ class TelemetryApp(QMainWindow):
 
     def parse_and_update_ui(self, line):
         try:
-            try:
-                self.udp_socket.sendto(line.encode('utf-8'), self.udp_broadcast_address)
-            except Exception as e:
-                print(f"UDP送信エラー: {e}")
             parts = [float(p) for p in line.split(',')]
             if len(parts) == 18:
                 roll, pitch, yaw, alt, ail, elev, thro, rudd, aux1, aux2, aux3, aux4, *_ = parts
                 self.latest_attitude = {'roll': roll, 'pitch': pitch, 'yaw': yaw, 'alt': alt}
-                
+
                 self.adi_widget.set_attitude(roll, pitch)
                 self.altimeter_widget.set_altitude(alt)
                 self.heading_label.setText(f"方位: {yaw:.1f} °")
                 self.update_aux_switches([aux1, aux2, aux3, aux4])
-                
+
                 rud_norm = self.normalize_symmetrical(rudd, **self.RC_RANGES['rudd'])
                 ele_norm = self.normalize_symmetrical(elev, **self.RC_RANGES['elev'])
                 rud_norm = -rud_norm
                 ele_norm = -ele_norm
                 self.left_stick.set_position(rud_norm, ele_norm)
                 self.left_stick_label.setText(f"R: {int(rudd)}, E: {int(elev)}")
-                
+
                 ail_norm = self.normalize_symmetrical(ail, **self.RC_RANGES['ail'])
                 thr_norm = self.normalize_value(thro, **self.RC_RANGES['thro'])
                 self.right_stick.set_position(ail_norm, thr_norm)
@@ -689,32 +813,43 @@ class TelemetryApp(QMainWindow):
         off_style = "background-color: #555; color: white; padding: 5px; border-radius: 3px;"
 
         mission_text = "なし"
-        missions = { 1: "水平旋回", 2: "上昇旋回", 3: "八の字旋回" } # AUX index (0-based) to mission_mode
+        missions = { 2: "水平旋回", 3: "上昇旋回", 4: "八の字旋回" } # AUX switch number to mission name
 
         for i, value in enumerate(aux_values):
             label = self.aux_labels[i]
             is_on = value > 1100
+            aux_number = i + 1  # AUX1, AUX2, AUX3, AUX4
 
             if is_on:
-                label.setText(f"AUX{i+1}: ON")
+                if aux_number == 1:
+                    label.setText(f"AUX1: ON")
+                else:
+                    label.setText(f"AUX{aux_number}: ON")
                 label.setStyleSheet(on_style)
-                # i は 0-3, missionsのキーは 1-3. AUX2 is index 1.
-                if (i+1) in missions:
-                    mission_text = missions[i+1]
+                # Check if this AUX is assigned to a mission
+                if aux_number in missions:
+                    mission_text = missions[aux_number]
             else:
-                label.setText(f"AUX{i+1}: OFF")
+                if aux_number == 1:
+                    label.setText(f"AUX1: OFF")
+                else:
+                    label.setText(f"AUX{aux_number}: OFF")
                 label.setStyleSheet(off_style)
 
         self.mission_status_label.setText(f"ミッション: {mission_text}")
 
     def check_mission_triggers(self, aux_values):
-        # Map AUX SWITCH NUMBER (2, 3, 4) to mission_mode (1, 2, 3)
+        # Map AUX SWITCH NUMBER to mission_mode
+        # AUX1: 物資投下（ミッション処理なし）
+        # AUX2: 水平旋回（Mission 1）
+        # AUX3: 上昇旋回（Mission 2）
+        # AUX4: 八の字旋回（Mission 3）
         mission_map = {
-            2: 1, # AUX2 -> Mission 1 (Horizontal)
-            3: 2, # AUX3 -> Mission 2 (Ascending)
-            4: 3  # AUX4 -> Mission 3 (Fig-8)
+            2: 1, # AUX2 -> Mission 1 (水平旋回)
+            3: 2, # AUX3 -> Mission 2 (上昇旋回)
+            4: 3  # AUX4 -> Mission 3 (八の字旋回)
         }
-        
+
         mission_found = False
         # Prioritize lower AUX numbers if multiple are on
         for aux_number in sorted(mission_map.keys()):
@@ -725,7 +860,7 @@ class TelemetryApp(QMainWindow):
                 if prev_val < 1100: # And it was previously OFF (rising edge)
                     self.start_mission(mission_map[aux_number])
                 break # Only handle one mission at a time
-        
+
         if not mission_found:
             self.stop_mission()
 
@@ -753,10 +888,15 @@ class TelemetryApp(QMainWindow):
         self.autopilot_active = False
         self.active_mission_mode = 0
 
+        # 目標角度の表示をクリア
+        self.roll_widget.set_target_angle(None)
+        self.pitch_widget.set_target_angle(None)
+        self.yaw_widget.set_target_angle(None)
+
     def run_autopilot_cycle(self):
         if not self.is_connected:
             return
-            
+
         if not self.autopilot_active:
             if self.last_autopilot_commands:
                 self.send_serial_command(self.last_autopilot_commands)
@@ -776,23 +916,32 @@ class TelemetryApp(QMainWindow):
 
         target_roll = 0
         target_pitch = 0
-        target_throttle = 1300 # TODO: Make adjustable
+        target_throttle = int(self.current_autopilot_params.get('autopilot_throttle', 1300))
 
         if self.active_mission_mode == 1: # Horizontal Turn
-            target_roll = 20 # TODO: Make adjustable
+            target_roll = self.current_autopilot_params.get('bank_angle', 20)
             self.alt_pid.setpoint = self.mission_start_altitude
-            if abs(self.yaw_diff) > 760:
+            horizontal_target = self.current_autopilot_params.get('horizontal_turn_target', 760)
+            if abs(self.yaw_diff) > horizontal_target:
                 self.mission_status_label.setText("ミッション: 水平旋回 成功")
         # ... other missions ...
 
         target_pitch_from_alt = self.alt_pid.update(current_alt, dt)
-        self.pitch_pid.setpoint = target_pitch_from_alt + target_pitch
+        final_target_pitch = target_pitch_from_alt + target_pitch
+        self.pitch_pid.setpoint = final_target_pitch
         elev_out = self.pitch_pid.update(current_pitch, dt)
 
         self.roll_pid.setpoint = target_roll
         ail_out = self.roll_pid.update(current_roll, dt)
-        
+
         rudd_out = 0
+
+        # 目標角度を2D表示に送信
+        self.roll_widget.set_target_angle(target_roll)
+        self.pitch_widget.set_target_angle(final_target_pitch)
+        # ヨーの目標角度は複雑なので、とりあえず現在のヨー差分を表示
+        target_yaw_display = self.mission_start_yaw + self.yaw_diff
+        self.yaw_widget.set_target_angle(target_yaw_display)
 
         commands = {
             'ail': self.denormalize_symmetrical(ail_out, 'ail'),
@@ -826,14 +975,13 @@ class TelemetryApp(QMainWindow):
     def closeEvent(self, event):
         if self.video_thread and self.video_thread.isRunning():
             self.video_thread.stop()
-        
+
         self.is_connected = False
         if self.read_thread and self.read_thread.is_alive():
             self.read_thread.join(timeout=2)
         if self.serial_connection and self.serial_connection.is_open:
             self.serial_connection.close()
 
-        self.udp_socket.close()
         event.accept()
 
 if __name__ == "__main__":
