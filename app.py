@@ -198,10 +198,24 @@ class StickWidget(QWidget):
         self._y_label = y_label
         self._x = 0
         self._y = 0
+        self._autopilot_x = None  # 自動操縦時のX値（None = 非表示）
+        self._autopilot_y = None  # 自動操縦時のY値（None = 非表示）
+        self._autopilot_active = False
+
     def set_position(self, x, y):
         self._x = x
         self._y = y
         self.update()
+
+    def set_autopilot_position(self, x, y):
+        self._autopilot_x = x
+        self._autopilot_y = y
+        self.update()
+
+    def set_autopilot_active(self, active):
+        self._autopilot_active = active
+        self.update()
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -215,11 +229,21 @@ class StickWidget(QWidget):
         painter.setPen(QColor("white"))
         painter.drawText(QRectF(0, 0, self.width(), 15), Qt.AlignCenter, self._y_label)
         painter.drawText(QRectF(self.width() - 35, 0, 35, self.height()), Qt.AlignCenter, self._x_label)
+
+        # 現在のプロポ入力位置（シアン）
         center_x = self.width()/2 + self._x * (self.width()/2 - 10)
         center_y = self.height()/2 - self._y * (self.height()/2 - 10)
         painter.setBrush(QColor("cyan"))
         painter.setPen(QColor("white"))
         painter.drawEllipse(QPointF(center_x, center_y), 5, 5)
+
+        # 自動操縦時の目標位置（黄色）
+        if self._autopilot_active and self._autopilot_x is not None and self._autopilot_y is not None:
+            autopilot_x = self.width()/2 + self._autopilot_x * (self.width()/2 - 10)
+            autopilot_y = self.height()/2 - self._autopilot_y * (self.height()/2 - 10)
+            painter.setBrush(QColor("yellow"))
+            painter.setPen(QColor("black"))
+            painter.drawEllipse(QPointF(autopilot_x, autopilot_y), 7, 7)
 
 class Attitude2DWidget(QWidget):
     def __init__(self, image_path, parent=None):
@@ -804,6 +828,9 @@ class TelemetryApp(QMainWindow):
                 self.right_stick.set_position(ail_norm, thr_norm)
                 self.right_stick_label.setText(f"A: {int(ail)}, T: {int(thro)}")
 
+                # スティックウィジェットに自動操縦状態を設定
+                self.left_stick.set_autopilot_active(self.autopilot_active)
+                self.right_stick.set_autopilot_active(self.autopilot_active)
                 self.check_mission_triggers([aux1, aux2, aux3, aux4])
         except (ValueError, IndexError) as e:
             print(f"データ解析エラー: {e} - {line}")
@@ -893,6 +920,10 @@ class TelemetryApp(QMainWindow):
         self.pitch_widget.set_target_angle(None)
         self.yaw_widget.set_target_angle(None)
 
+        # スティックウィジェットの自動操縦表示をクリア
+        self.left_stick.set_autopilot_position(None, None)
+        self.right_stick.set_autopilot_position(None, None)
+
     def run_autopilot_cycle(self):
         if not self.is_connected:
             return
@@ -908,9 +939,16 @@ class TelemetryApp(QMainWindow):
         current_yaw = self.latest_attitude.get('yaw', 0)
         dt = 0.05 # 50ms interval
 
+        # ヨー角の差分計算（-180〜180度の範囲で正規化）
         delta_yaw = current_yaw - self.last_yaw
-        if delta_yaw > 180: delta_yaw -= 360
-        if delta_yaw < -180: delta_yaw += 360
+
+        # 180度を跨ぐ場合の処理
+        if delta_yaw > 180:
+            delta_yaw -= 360  # 例: 350° - 10° = 340° → -20°
+        elif delta_yaw < -180:
+            delta_yaw += 360  # 例: 10° - 350° = -340° → 20°
+
+        # 累積ヨー差分に加算
         self.yaw_diff += delta_yaw
         self.last_yaw = current_yaw
 
@@ -942,6 +980,16 @@ class TelemetryApp(QMainWindow):
         # ヨーの目標角度は複雑なので、とりあえず現在のヨー差分を表示
         target_yaw_display = self.mission_start_yaw + self.yaw_diff
         self.yaw_widget.set_target_angle(target_yaw_display)
+
+        # 自動操縦時の操作量をスティック表示に送信
+        # スロットルは正規化する必要がある
+        thro_norm = self.normalize_value(target_throttle, **self.RC_RANGES['thro'])
+
+        # 左スティック（ラダー、エレベーター）
+        self.left_stick.set_autopilot_position(rudd_out, -elev_out)  # エレベーターは反転
+
+        # 右スティック（エルロン、スロットル）
+        self.right_stick.set_autopilot_position(ail_out, thro_norm)
 
         commands = {
             'ail': self.denormalize_symmetrical(ail_out, 'ail'),
