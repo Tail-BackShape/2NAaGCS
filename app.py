@@ -309,8 +309,8 @@ class TelemetryApp(QMainWindow):
     def _create_video_group(self):
         group = QGroupBox("ビデオストリーム")
         layout = QGridLayout(group)
-        self.video_url_input = QLineEdit("http://192.168.0.10:8080/video")
-        self.video_toggle_button = QPushButton("配信開始")
+        self.video_url_input = QLineEdit("http://tsuna.local:8080/video")
+        self.video_toggle_button = QPushButton("FPV")
         self.video_toggle_button.clicked.connect(self.toggle_video_stream)
         layout.addWidget(QLabel("URL:"), 0, 0)
         layout.addWidget(self.video_url_input, 0, 1)
@@ -513,5 +513,5 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     window = TelemetryApp()
-    window.show()
+    window.showMaximized()
     sys.exit(app.exec())
