@@ -14,11 +14,33 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGroupBox, QFormLayout, QComboBox, QPushButton, QLabel, QGridLayout, QLineEdit, QCheckBox
 )
-from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPolygonF, QImage, QPixmap, QTransform
+from PySide6.QtGui import (
+    QPainter, QColor, QPen, QBrush, QPolygonF, QImage, QPixmap, QTransform, QLinearGradient
+)
 from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, QThread, Signal, Slot
 
-# QtInteractorは必要時にのみインポート
-# QtInteractor = None
+# --- PID Controller ---
+class PIDController:
+    def __init__(self, Kp, Ki, Kd, setpoint=0, output_limits=(-1, 1), integral_limits=(-1, 1)):
+        self.Kp, self.Ki, self.Kd = Kp, Ki, Kd
+        self.setpoint = setpoint
+        self.output_limits = output_limits
+        self.integral_limits = integral_limits
+        self.last_error = 0
+        self.integral = 0
+
+    def update(self, process_variable, dt):
+        error = self.setpoint - process_variable
+        self.integral += error * dt
+        self.integral = max(self.integral_limits[0], min(self.integral, self.integral_limits[1]))
+        derivative = (error - self.last_error) / dt if dt > 0 else 0
+        output = self.Kp * error + self.Ki * self.integral + self.Kd * derivative
+        self.last_error = error
+        return max(self.output_limits[0], min(output, self.output_limits[1]))
+
+    def reset(self):
+        self.last_error = 0
+        self.integral = 0
 
 # --- Video Worker Thread ---
 class VideoWorker(QThread):
@@ -65,7 +87,7 @@ class VideoWorker(QThread):
         self._running = False
         self.wait()
 
-# --- Custom UI Widgets (Omitted for brevity) ---
+# --- Custom UI Widgets ---
 class ADIWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -103,6 +125,71 @@ class ADIWidget(QWidget):
         painter.drawLine(-50, 0, -10, 0)
         painter.drawLine(10, 0, 50, 0)
         painter.drawLine(0, -5, 0, 5)
+
+class AltimeterWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(80, 200)
+        self._altitude = 0
+        self._max_display_alt = 100 # max altitude for the bar display
+
+    def set_altitude(self, altitude):
+        self._altitude = altitude
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        width = self.width()
+        height = self.height()
+        padding = 10
+
+        # Background
+        painter.fillRect(self.rect(), QColor("#2b2b2b"))
+
+        # Bar background
+        bar_rect = QRectF(padding, padding, width - 2 * padding, height - 2 * padding)
+        painter.setPen(QColor("gray"))
+        painter.setBrush(QColor("#444"))
+        painter.drawRect(bar_rect)
+
+        # Altitude bar fill
+        fill_height_ratio = min(self._altitude / self._max_display_alt, 1.0)
+        if fill_height_ratio < 0: fill_height_ratio = 0
+
+        fill_height = bar_rect.height() * fill_height_ratio
+        fill_rect = QRectF(bar_rect.left(), bar_rect.bottom() - fill_height, bar_rect.width(), fill_height)
+
+        # Gradient for the bar
+        gradient = QLinearGradient(bar_rect.topLeft(), bar_rect.bottomLeft())
+        gradient.setColorAt(0, QColor("red"))
+        gradient.setColorAt(0.5, QColor("yellow"))
+        gradient.setColorAt(1, QColor("lime"))
+
+        painter.setBrush(gradient)
+        painter.setPen(Qt.NoPen)
+        painter.drawRect(fill_rect)
+
+        # Altitude Text
+        painter.setPen(QColor("white"))
+        font = painter.font()
+        font.setBold(True)
+        font.setPointSize(12)
+        painter.setFont(font)
+        painter.drawText(self.rect(), Qt.AlignCenter | Qt.AlignTop, f"{self._altitude:.1f} m")
+
+        # Scale markings
+        painter.setPen(QColor("white"))
+        font.setBold(False)
+        font.setPointSize(8)
+        painter.setFont(font)
+        num_ticks = 5
+        for i in range(num_ticks + 1):
+            tick_alt = (self._max_display_alt / num_ticks) * i
+            y_pos = bar_rect.bottom() - (bar_rect.height() * (i / num_ticks))
+            painter.drawLine(bar_rect.right(), y_pos, bar_rect.right() + 5, y_pos)
+            painter.drawText(QRectF(bar_rect.right() + 7, y_pos - 8, 30, 16), Qt.AlignLeft | Qt.AlignVCenter, str(int(tick_alt)))
 
 class StickWidget(QWidget):
     def __init__(self, x_label, y_label, parent=None):
@@ -191,6 +278,14 @@ class TelemetryApp(QMainWindow):
         ("Pitch P", "pitch_p", "0.1"), ("Pitch I", "pitch_i", "0.01"), ("Pitch D", "pitch_d", "0.05"),
         ("Yaw P", "yaw_p", "0.2"), ("Yaw I", "yaw_i", "0.0"), ("Yaw D", "yaw_d", "0.0"),
     ]
+    
+    RC_RANGES = {
+        'ail': {'min_in': 560, 'center_in': 1164, 'max_in': 1750},
+        'elev': {'min_in': 800, 'center_in': 966, 'max_in': 1070},
+        'rudd': {'min_in': 830, 'center_in': 1148, 'max_in': 1500},
+        'thro': {'min_in': 360, 'max_in': 1590}
+    }
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("RC Telemetry Display (PySide6)")
@@ -198,17 +293,49 @@ class TelemetryApp(QMainWindow):
 
         self.serial_connection = None
         self.is_connected = False
+        self.read_thread = None
         self.data_queue = queue.Queue()
         self.video_thread = None
         self.pid_gain_edits = {}
         self.current_pid_gains = {}
-        self.latest_attitude = {'roll': 0, 'pitch': 0, 'yaw': 0}
-        self.latest_aux_values = []
 
         self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         self.udp_broadcast_address = ('<broadcast>', 12345)
 
+        # --- Autopilot State ---
+        self.autopilot_active = False
+        self.active_mission_mode = 0  # 0: Manual, 1: Horizontal, 2: Ascending, 3: Fig-8
+        self.mission_start_yaw = 0
+        self.mission_start_altitude = 0
+        self.yaw_diff = 0
+        self.last_yaw = 0
+        self.last_autopilot_commands = None
+        self.previous_aux_values = [0, 0, 0, 0]
+        self.latest_attitude = {'roll': 0, 'pitch': 0, 'yaw': 0, 'alt': 0}
+
+        self._setup_ui()
+        self.load_pid_gains() # Also initializes PID controllers
+        self._setup_timers()
+        self.update_com_ports()
+
+    @staticmethod
+    def normalize_value(value, min_in, max_in, min_out=-1.0, max_out=1.0):
+        if max_in == min_in: return 0
+        value = max(min_in, min(value, max_in))
+        return min_out + (value - min_in) * (max_out - min_out) / (max_in - min_in)
+
+    @staticmethod
+    def normalize_symmetrical(value, min_in, center_in, max_in):
+        value = max(min_in, min(value, max_in))
+        if value >= center_in:
+            span = max_in - center_in
+            return (value - center_in) / span if span > 0 else 1.0
+        else:
+            span = center_in - min_in
+            return (value - center_in) / span if span > 0 else -1.0
+
+    def _setup_ui(self):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         main_layout = QHBoxLayout(main_widget)
@@ -234,42 +361,77 @@ class TelemetryApp(QMainWindow):
 
         video_widget = self._setup_video_display()
         pid_panel = self._create_autopilot_panel()
-        self.load_pid_gains()
 
         top_right_layout.addWidget(video_widget)
         top_right_layout.addWidget(pid_panel)
         top_right_layout.addStretch(1)
 
         self.right_layout.addWidget(top_right_widget, 1)
-
         self._setup_2d_attitude_display(right_panel)
 
-        self.update_com_ports()
-
-        # --- Timers ---
+    def _setup_timers(self):
+        # Telemetry processing timer
         self.telemetry_timer = QTimer(self)
         self.telemetry_timer.timeout.connect(self.process_serial_queue)
         self.telemetry_timer.start(50)  # 20Hz
 
-        self.control_data_timer = QTimer(self)
-        self.control_data_timer.timeout.connect(self.send_control_data)
-        self.control_data_timer.start(20) # 50Hz
+        # 2D Attitude update timer
+        self.attitude_2d_timer = QTimer(self)
+        self.attitude_2d_timer.timeout.connect(self.update_2d_attitude)
+        self.attitude_2d_timer.start(100) # 10Hz
 
-    @staticmethod
-    def normalize_value(value, min_in, max_in, min_out=-1.0, max_out=1.0):
-        if max_in == min_in: return 0
-        value = max(min_in, min(value, max_in))
-        return min_out + (value - min_in) * (max_out - min_out) / (max_in - min_in)
+        # Autopilot loop timer
+        self.autopilot_timer = QTimer(self)
+        self.autopilot_timer.timeout.connect(self.run_autopilot_cycle)
+        self.autopilot_timer.start(50) # 20 Hz
 
-    @staticmethod
-    def normalize_symmetrical(value, min_in, center_in, max_in):
-        value = max(min_in, min(value, max_in))
-        if value >= center_in:
-            span = max_in - center_in
-            return (value - center_in) / span if span > 0 else 1.0
-        else:
-            span = center_in - min_in
-            return (value - center_in) / span if span > 0 else -1.0
+    def _init_pid_controllers(self):
+        gains = self.current_pid_gains
+        self.roll_pid = PIDController(gains.get('roll_p', 0), gains.get('roll_i', 0), gains.get('roll_d', 0))
+        self.pitch_pid = PIDController(gains.get('pitch_p', 0), gains.get('pitch_i', 0), gains.get('pitch_d', 0))
+        # TODO: Make alt PID gains adjustable
+        self.alt_pid = PIDController(Kp=0.1, Ki=0.02, Kd=0.05, output_limits=(-15, 15)) # Output is target pitch angle
+        self.yaw_pid = PIDController(gains.get('yaw_p', 0), gains.get('yaw_i', 0), gains.get('yaw_d', 0))
+        print("PID controllers initialized/updated.")
+
+    def update_and_save_pid_gains(self):
+        gains_to_save = {}
+        try:
+            for _, key, _ in self.GAINS_TO_TUNE:
+                value_str = self.pid_gain_edits[key].text()
+                self.current_pid_gains[key] = float(value_str)
+                gains_to_save[key] = value_str
+            
+            with open("coef.txt", "w") as f:
+                json.dump(gains_to_save, f, indent=4)
+            
+            print(f"PID gains updated and saved: {self.current_pid_gains}")
+            self._init_pid_controllers()
+        except ValueError as e:
+            print(f"PIDゲインの値が不正です: {e}")
+        except Exception as e:
+            print(f"PIDゲインの保存中にエラーが発生しました: {e}")
+
+    def load_pid_gains(self):
+        try:
+            with open("coef.txt", "r") as f:
+                gains = json.load(f)
+            
+            for key, value in gains.items():
+                if key in self.pid_gain_edits:
+                    self.pid_gain_edits[key].setText(str(value))
+                    self.current_pid_gains[key] = float(value)
+            print(f"Loaded PID gains from coef.txt: {self.current_pid_gains}")
+
+        except FileNotFoundError:
+            print("coef.txt not found, using default PID gains.")
+            for _, key, default_value in self.GAINS_TO_TUNE:
+                self.current_pid_gains[key] = float(default_value)
+            print(f"Using default PID gains: {self.current_pid_gains}")
+        except Exception as e:
+            print(f"PIDゲインの読み込み中にエラーが発生しました: {e}")
+        
+        self._init_pid_controllers()
 
     def _create_connection_group(self):
         group = QGroupBox("シリアル接続")
@@ -289,15 +451,20 @@ class TelemetryApp(QMainWindow):
     def _create_instrument_group(self):
         group = QGroupBox("計器")
         main_layout = QVBoxLayout()
+
+        instrument_layout = QHBoxLayout()
         self.adi_widget = ADIWidget()
-        self.altitude_label = QLabel("高度: 0.0 m")
+        self.altimeter_widget = AltimeterWidget()
+        instrument_layout.addWidget(self.adi_widget)
+        instrument_layout.addWidget(self.altimeter_widget)
+
+        main_layout.addLayout(instrument_layout)
+
         self.heading_label = QLabel("方位: 0.0 °")
         self.mission_status_label = QLabel("ミッション: なし")
         self.mission_status_label.setAlignment(Qt.AlignCenter)
         self.mission_status_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #FFD700; padding: 5px;")
 
-        main_layout.addWidget(self.adi_widget, 0, Qt.AlignCenter)
-        main_layout.addWidget(self.altitude_label)
         main_layout.addWidget(self.heading_label)
         main_layout.addWidget(self.mission_status_label)
 
@@ -354,45 +521,6 @@ class TelemetryApp(QMainWindow):
 
         return group
 
-    def update_and_save_pid_gains(self):
-        """PIDゲインを更新し、ファイルに保存する"""
-        gains_to_save = {}
-        try:
-            for _, key, _ in self.GAINS_TO_TUNE:
-                value_str = self.pid_gain_edits[key].text()
-                self.current_pid_gains[key] = float(value_str) # Update internal state
-                gains_to_save[key] = value_str # Save as string
-            
-            with open("coef.txt", "w") as f:
-                json.dump(gains_to_save, f, indent=4)
-            
-            print(f"PID gains updated and saved: {self.current_pid_gains}")
-        except ValueError as e:
-            print(f"PIDゲインの値が不正です: {e}")
-        except Exception as e:
-            print(f"PIDゲインの保存中にエラーが発生しました: {e}")
-
-    def load_pid_gains(self):
-        """coef.txtからPIDゲインを読み込んで適用する"""
-        try:
-            with open("coef.txt", "r") as f:
-                gains = json.load(f)
-            
-            for key, value in gains.items():
-                if key in self.pid_gain_edits:
-                    self.pid_gain_edits[key].setText(str(value))
-                    self.current_pid_gains[key] = float(value)
-            print(f"Loaded PID gains from coef.txt: {self.current_pid_gains}")
-
-        except FileNotFoundError:
-            print("coef.txt not found, using default PID gains.")
-            for _, key, default_value in self.GAINS_TO_TUNE:
-                self.current_pid_gains[key] = float(default_value)
-            print(f"Using default PID gains: {self.current_pid_gains}")
-
-        except Exception as e:
-            print(f"PIDゲインの読み込み中にエラーが発生しました: {e}")
-
     def _setup_video_display(self):
         video_container = QWidget()
         video_layout = QVBoxLayout(video_container)
@@ -409,7 +537,6 @@ class TelemetryApp(QMainWindow):
         return video_container
 
     def _setup_2d_attitude_display(self, parent):
-        """2D姿勢表示ウィジェットをセットアップ"""
         container = QGroupBox("2D姿勢表示")
         layout = QHBoxLayout(container)
 
@@ -423,51 +550,7 @@ class TelemetryApp(QMainWindow):
 
         self.right_layout.addWidget(container, 2)
 
-        self.attitude_2d_timer = QTimer(self)
-        self.attitude_2d_timer.timeout.connect(self.update_2d_attitude)
-        self.attitude_2d_timer.start(100) # 10Hz
-
-    def get_mission_mode(self):
-        """AUXチャンネルの状態から現在のミッションモードを決定する"""
-        # 0:手動, 1:水平旋回(AUX2), 2:八の字(AUX3), 3:上昇旋回(AUX4), 4:自動離着陸(AUX1)
-        if len(self.latest_aux_values) == 4:
-            if self.latest_aux_values[1] > 1100: return 1
-            elif self.latest_aux_values[2] > 1100: return 2
-            elif self.latest_aux_values[3] > 1100: return 3
-            elif self.latest_aux_values[0] > 1100: return 4
-        return 0 # Manual
-
-    def send_control_data(self):
-        """PC側で計算した制御データをシリアルポートに送信する"""
-        if not self.is_connected or not self.serial_connection.is_open:
-            return
-
-        # 操舵量は後で計算するため、現在は仮の値を送信
-        aileron_cmd = 1500
-        elevator_cmd = 1500
-        rudder_cmd = 1500
-        throttle_cmd = 1000
-
-        mission_mode = self.get_mission_mode()
-        
-        # AUXチャンネルの操作 (bitmask)
-        aux_bitmask = 0
-        if len(self.latest_aux_values) == 4:
-            for i, val in enumerate(self.latest_aux_values):
-                if val > 1100:
-                    aux_bitmask |= (1 << i)
-
-        try:
-            data_str = f"{aileron_cmd},{elevator_cmd},{rudder_cmd},{throttle_cmd},{mission_mode},{aux_bitmask}\n"
-            self.serial_connection.write(data_str.encode('utf-8'))
-        except serial.SerialException as e:
-            print(f"Error sending control data: {e}")
-            self.toggle_connection() # Assume connection is lost
-        except Exception as e:
-            print(f"An unexpected error occurred while sending data: {e}")
-
     def update_2d_attitude(self):
-        """2D姿勢表示を更新"""
         roll = self.latest_attitude.get('roll', 0)
         pitch = self.latest_attitude.get('pitch', 0)
         yaw = self.latest_attitude.get('yaw', 0)
@@ -524,27 +607,36 @@ class TelemetryApp(QMainWindow):
             try:
                 self.serial_connection = serial.Serial(port, baudrate=115200, timeout=1)
                 self.is_connected = True
+                self.read_thread = threading.Thread(target=self.read_serial_data, daemon=True)
+                self.read_thread.start()
                 self.connect_button.setText("切断")
                 self.com_port_combo.setEnabled(False)
                 self.refresh_button.setEnabled(False)
-                threading.Thread(target=self.read_serial_data, daemon=True).start()
             except serial.SerialException as e:
                 print(f"接続に失敗しました: {e}")
         else:
             self.is_connected = False
-            if self.serial_connection:
+            if self.read_thread and self.read_thread.is_alive():
+                self.read_thread.join(timeout=2)
+            if self.serial_connection and self.serial_connection.is_open:
                 self.serial_connection.close()
+                self.serial_connection = None
+            self.read_thread = None
             self.connect_button.setText("接続")
             self.com_port_combo.setEnabled(True)
             self.refresh_button.setEnabled(True)
 
     def read_serial_data(self):
-        while self.is_connected and self.serial_connection:
+        while self.is_connected:
             try:
                 line = self.serial_connection.readline().decode('utf-8').strip()
                 if line:
                     self.data_queue.put(line)
             except (serial.SerialException, UnicodeDecodeError):
+                print("Serial reading error, closing connection.")
+                break
+            except Exception as e:
+                print(f"Unexpected error in read_serial_data: {e}")
                 break
         self.data_queue.put("CONNECTION_LOST")
 
@@ -569,23 +661,26 @@ class TelemetryApp(QMainWindow):
             parts = [float(p) for p in line.split(',')]
             if len(parts) == 18:
                 roll, pitch, yaw, alt, ail, elev, thro, rudd, aux1, aux2, aux3, aux4, *_ = parts
-                self.latest_attitude = {'roll': roll, 'pitch': pitch, 'yaw': yaw}
-                self.latest_aux_values = [aux1, aux2, aux3, aux4]
-
+                self.latest_attitude = {'roll': roll, 'pitch': pitch, 'yaw': yaw, 'alt': alt}
+                
                 self.adi_widget.set_attitude(roll, pitch)
-                self.altitude_label.setText(f"高度: {alt:.1f} m")
+                self.altimeter_widget.set_altitude(alt)
                 self.heading_label.setText(f"方位: {yaw:.1f} °")
-                self.update_aux_switches(self.latest_aux_values)
-                rud_norm = self.normalize_symmetrical(rudd, 830, 1148, 1500)
-                ele_norm = self.normalize_symmetrical(elev, 800, 966, 1070)
+                self.update_aux_switches([aux1, aux2, aux3, aux4])
+                
+                rud_norm = self.normalize_symmetrical(rudd, **self.RC_RANGES['rudd'])
+                ele_norm = self.normalize_symmetrical(elev, **self.RC_RANGES['elev'])
                 rud_norm = -rud_norm
                 ele_norm = -ele_norm
                 self.left_stick.set_position(rud_norm, ele_norm)
                 self.left_stick_label.setText(f"R: {int(rudd)}, E: {int(elev)}")
-                ail_norm = self.normalize_symmetrical(ail, 560, 1164, 1750)
-                thr_norm = self.normalize_value(thro, 360, 1590)
+                
+                ail_norm = self.normalize_symmetrical(ail, **self.RC_RANGES['ail'])
+                thr_norm = self.normalize_value(thro, **self.RC_RANGES['thro'])
                 self.right_stick.set_position(ail_norm, thr_norm)
                 self.right_stick_label.setText(f"A: {int(ail)}, T: {int(thro)}")
+
+                self.check_mission_triggers([aux1, aux2, aux3, aux4])
         except (ValueError, IndexError) as e:
             print(f"データ解析エラー: {e} - {line}")
 
@@ -593,40 +688,156 @@ class TelemetryApp(QMainWindow):
         on_style = "background-color: #28a745; color: white; padding: 5px; border-radius: 3px;"
         off_style = "background-color: #555; color: white; padding: 5px; border-radius: 3px;"
 
-        mission_map = {
-            1: "水平旋回",
-            2: "八の字飛行",
-            3: "上昇旋回",
-            4: "自動離着陸"
-        }
-        mission_mode = self.get_mission_mode()
-        mission_text = mission_map.get(mission_mode, "手動操縦")
+        mission_text = "なし"
+        missions = { 1: "水平旋回", 2: "上昇旋回", 3: "八の字旋回" } # AUX index (0-based) to mission_mode
+
+        for i, value in enumerate(aux_values):
+            label = self.aux_labels[i]
+            is_on = value > 1100
+
+            if is_on:
+                label.setText(f"AUX{i+1}: ON")
+                label.setStyleSheet(on_style)
+                # i は 0-3, missionsのキーは 1-3. AUX2 is index 1.
+                if (i+1) in missions:
+                    mission_text = missions[i+1]
+            else:
+                label.setText(f"AUX{i+1}: OFF")
+                label.setStyleSheet(off_style)
 
         self.mission_status_label.setText(f"ミッション: {mission_text}")
 
-        if len(aux_values) == 4:
-            for i, value in enumerate(aux_values):
-                label = self.aux_labels[i]
-                is_on = value > 1100
-                if is_on:
-                    label.setText(f"AUX{i+1}: ON")
-                    label.setStyleSheet(on_style)
-                else:
-                    label.setText(f"AUX{i+1}: OFF")
-                    label.setStyleSheet(off_style)
+    def check_mission_triggers(self, aux_values):
+        # Map AUX SWITCH NUMBER (2, 3, 4) to mission_mode (1, 2, 3)
+        mission_map = {
+            2: 1, # AUX2 -> Mission 1 (Horizontal)
+            3: 2, # AUX3 -> Mission 2 (Ascending)
+            4: 3  # AUX4 -> Mission 3 (Fig-8)
+        }
+        
+        mission_found = False
+        # Prioritize lower AUX numbers if multiple are on
+        for aux_number in sorted(mission_map.keys()):
+            aux_index = aux_number - 1
+            if aux_values[aux_index] > 1100: # If this mission switch is ON
+                mission_found = True
+                prev_val = self.previous_aux_values[aux_index]
+                if prev_val < 1100: # And it was previously OFF (rising edge)
+                    self.start_mission(mission_map[aux_number])
+                break # Only handle one mission at a time
+        
+        if not mission_found:
+            self.stop_mission()
+
+        self.previous_aux_values = list(aux_values)
+
+    def start_mission(self, mission_mode):
+        if self.autopilot_active and self.active_mission_mode == mission_mode:
+            return
+        print(f"Starting Mission: {mission_mode}")
+        self.autopilot_active = True
+        self.active_mission_mode = mission_mode
+        self.mission_start_yaw = self.latest_attitude.get('yaw', 0)
+        self.mission_start_altitude = self.latest_attitude.get('alt', 0)
+        self.last_yaw = self.mission_start_yaw
+        self.yaw_diff = 0
+        self.roll_pid.reset()
+        self.pitch_pid.reset()
+        self.alt_pid.reset()
+        self.yaw_pid.reset()
+
+    def stop_mission(self):
+        if not self.autopilot_active:
+            return
+        print("Stopping Mission, holding last commands.")
+        self.autopilot_active = False
+        self.active_mission_mode = 0
+
+    def run_autopilot_cycle(self):
+        if not self.is_connected:
+            return
+            
+        if not self.autopilot_active:
+            if self.last_autopilot_commands:
+                self.send_serial_command(self.last_autopilot_commands)
+            return
+
+        current_alt = self.latest_attitude.get('alt', self.mission_start_altitude)
+        current_roll = self.latest_attitude.get('roll', 0)
+        current_pitch = self.latest_attitude.get('pitch', 0)
+        current_yaw = self.latest_attitude.get('yaw', 0)
+        dt = 0.05 # 50ms interval
+
+        delta_yaw = current_yaw - self.last_yaw
+        if delta_yaw > 180: delta_yaw -= 360
+        if delta_yaw < -180: delta_yaw += 360
+        self.yaw_diff += delta_yaw
+        self.last_yaw = current_yaw
+
+        target_roll = 0
+        target_pitch = 0
+        target_throttle = 1300 # TODO: Make adjustable
+
+        if self.active_mission_mode == 1: # Horizontal Turn
+            target_roll = 20 # TODO: Make adjustable
+            self.alt_pid.setpoint = self.mission_start_altitude
+            if abs(self.yaw_diff) > 760:
+                self.mission_status_label.setText("ミッション: 水平旋回 成功")
+        # ... other missions ...
+
+        target_pitch_from_alt = self.alt_pid.update(current_alt, dt)
+        self.pitch_pid.setpoint = target_pitch_from_alt + target_pitch
+        elev_out = self.pitch_pid.update(current_pitch, dt)
+
+        self.roll_pid.setpoint = target_roll
+        ail_out = self.roll_pid.update(current_roll, dt)
+        
+        rudd_out = 0
+
+        commands = {
+            'ail': self.denormalize_symmetrical(ail_out, 'ail'),
+            'elev': self.denormalize_symmetrical(elev_out, 'elev'),
+            'rudd': self.denormalize_symmetrical(rudd_out, 'rudd'),
+            'thro': target_throttle
+        }
+        self.send_serial_command(commands)
+        self.last_autopilot_commands = commands
+
+    def send_serial_command(self, commands):
+        try:
+            command_str = f"A,{int(commands['ail'])},{int(commands['elev'])},{int(commands['rudd'])},{int(commands['thro'])},{self.active_mission_mode},1500\n"
+            if self.serial_connection and self.serial_connection.is_open:
+                self.serial_connection.write(command_str.encode('utf-8'))
+        except Exception as e:
+            print(f"Error sending serial command: {e}")
+
+    def denormalize_value(self, norm_val, channel):
+        conf = self.RC_RANGES[channel]
+        min_out, max_out = -1.0, 1.0
+        return conf['min_in'] + (norm_val - min_out) * (conf['max_in'] - conf['min_in']) / (max_out - min_out)
+
+    def denormalize_symmetrical(self, norm_val, channel):
+        conf = self.RC_RANGES[channel]
+        if norm_val >= 0:
+            return conf['center_in'] + norm_val * (conf['max_in'] - conf['center_in'])
+        else:
+            return conf['center_in'] + norm_val * (conf['center_in'] - conf['min_in'])
 
     def closeEvent(self, event):
         if self.video_thread and self.video_thread.isRunning():
             self.video_thread.stop()
+        
         self.is_connected = False
+        if self.read_thread and self.read_thread.is_alive():
+            self.read_thread.join(timeout=2)
         if self.serial_connection and self.serial_connection.is_open:
             self.serial_connection.close()
+
         self.udp_socket.close()
         event.accept()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-
     window = TelemetryApp()
     window.showMaximized()
     sys.exit(app.exec())
