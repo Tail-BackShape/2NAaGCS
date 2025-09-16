@@ -8,6 +8,7 @@ import socket
 import cv2
 import numpy as np
 import requests
+import json
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -185,6 +186,11 @@ class Attitude2DWidget(QWidget):
 
 # --- Main Application Window ---
 class TelemetryApp(QMainWindow):
+    GAINS_TO_TUNE = [
+        ("Roll P", "roll_p", "0.1"), ("Roll I", "roll_i", "0.01"), ("Roll D", "roll_d", "0.05"),
+        ("Pitch P", "pitch_p", "0.1"), ("Pitch I", "pitch_i", "0.01"), ("Pitch D", "pitch_d", "0.05"),
+        ("Yaw P", "yaw_p", "0.2"), ("Yaw I", "yaw_i", "0.0"), ("Yaw D", "yaw_d", "0.0"),
+    ]
     def __init__(self):
         super().__init__()
         self.setWindowTitle("RC Telemetry Display (PySide6)")
@@ -194,6 +200,10 @@ class TelemetryApp(QMainWindow):
         self.is_connected = False
         self.data_queue = queue.Queue()
         self.video_thread = None
+        self.pid_gain_edits = {}
+        self.current_pid_gains = {}
+        self.latest_attitude = {'roll': 0, 'pitch': 0, 'yaw': 0}
+        self.latest_aux_values = []
 
         self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -217,20 +227,33 @@ class TelemetryApp(QMainWindow):
         left_layout.addWidget(self._create_video_group())
         left_layout.addStretch(1)
 
-        # ビデオ表示ウィジェットをセットアップ
-        self._setup_video_display()
-        # 2D姿勢表示ウィジェットをセットアップ
+        # --- Right Panel Layout ---
+        top_right_widget = QWidget()
+        top_right_layout = QHBoxLayout(top_right_widget)
+        top_right_layout.setContentsMargins(0, 0, 0, 0)
+
+        video_widget = self._setup_video_display()
+        pid_panel = self._create_autopilot_panel()
+        self.load_pid_gains()
+
+        top_right_layout.addWidget(video_widget)
+        top_right_layout.addWidget(pid_panel)
+        top_right_layout.addStretch(1)
+
+        self.right_layout.addWidget(top_right_widget, 1)
+
         self._setup_2d_attitude_display(right_panel)
 
         self.update_com_ports()
 
-        # テレメトリータイマー（高頻度でデータ処理）
+        # --- Timers ---
         self.telemetry_timer = QTimer(self)
         self.telemetry_timer.timeout.connect(self.process_serial_queue)
-        self.telemetry_timer.start(50)  # 20Hz: UI表示用
+        self.telemetry_timer.start(50)  # 20Hz
 
-        # 姿勢データバッファ
-        self.latest_attitude = {'roll': 0, 'pitch': 0, 'yaw': 0}
+        self.control_data_timer = QTimer(self)
+        self.control_data_timer.timeout.connect(self.send_control_data)
+        self.control_data_timer.start(20) # 50Hz
 
     @staticmethod
     def normalize_value(value, min_in, max_in, min_out=-1.0, max_out=1.0):
@@ -317,11 +340,65 @@ class TelemetryApp(QMainWindow):
         layout.addWidget(self.video_toggle_button, 1, 0, 1, 2)
         return group
 
+    def _create_autopilot_panel(self):
+        group = QGroupBox("自動操縦係数調整")
+        layout = QFormLayout(group)
+
+        for label, key, default_value in self.GAINS_TO_TUNE:
+            self.pid_gain_edits[key] = QLineEdit(default_value)
+            layout.addRow(label, self.pid_gain_edits[key])
+
+        update_button = QPushButton("係数更新")
+        update_button.clicked.connect(self.update_and_save_pid_gains)
+        layout.addRow(update_button)
+
+        return group
+
+    def update_and_save_pid_gains(self):
+        """PIDゲインを更新し、ファイルに保存する"""
+        gains_to_save = {}
+        try:
+            for _, key, _ in self.GAINS_TO_TUNE:
+                value_str = self.pid_gain_edits[key].text()
+                self.current_pid_gains[key] = float(value_str) # Update internal state
+                gains_to_save[key] = value_str # Save as string
+            
+            with open("coef.txt", "w") as f:
+                json.dump(gains_to_save, f, indent=4)
+            
+            print(f"PID gains updated and saved: {self.current_pid_gains}")
+        except ValueError as e:
+            print(f"PIDゲインの値が不正です: {e}")
+        except Exception as e:
+            print(f"PIDゲインの保存中にエラーが発生しました: {e}")
+
+    def load_pid_gains(self):
+        """coef.txtからPIDゲインを読み込んで適用する"""
+        try:
+            with open("coef.txt", "r") as f:
+                gains = json.load(f)
+            
+            for key, value in gains.items():
+                if key in self.pid_gain_edits:
+                    self.pid_gain_edits[key].setText(str(value))
+                    self.current_pid_gains[key] = float(value)
+            print(f"Loaded PID gains from coef.txt: {self.current_pid_gains}")
+
+        except FileNotFoundError:
+            print("coef.txt not found, using default PID gains.")
+            for _, key, default_value in self.GAINS_TO_TUNE:
+                self.current_pid_gains[key] = float(default_value)
+            print(f"Using default PID gains: {self.current_pid_gains}")
+
+        except Exception as e:
+            print(f"PIDゲインの読み込み中にエラーが発生しました: {e}")
+
     def _setup_video_display(self):
         video_container = QWidget()
         video_layout = QVBoxLayout(video_container)
         video_layout.setContentsMargins(0,0,0,0)
         self.video_label = QLabel()
+        self.video_label.setFixedSize(640, 480)
         self.video_label.setAlignment(Qt.AlignCenter)
         self.video_label.setStyleSheet("background-color: black; color: white;")
         self.video_label.setText("ビデオストリーム停止中")
@@ -329,7 +406,7 @@ class TelemetryApp(QMainWindow):
         self.video_status_label.setFixedHeight(20)
         video_layout.addWidget(self.video_label)
         video_layout.addWidget(self.video_status_label)
-        self.right_layout.addWidget(video_container, 1)
+        return video_container
 
     def _setup_2d_attitude_display(self, parent):
         """2D姿勢表示ウィジェットをセットアップ"""
@@ -346,10 +423,48 @@ class TelemetryApp(QMainWindow):
 
         self.right_layout.addWidget(container, 2)
 
-        # 2D表示更新用のタイマー
         self.attitude_2d_timer = QTimer(self)
         self.attitude_2d_timer.timeout.connect(self.update_2d_attitude)
         self.attitude_2d_timer.start(100) # 10Hz
+
+    def get_mission_mode(self):
+        """AUXチャンネルの状態から現在のミッションモードを決定する"""
+        # 0:手動, 1:水平旋回(AUX2), 2:八の字(AUX3), 3:上昇旋回(AUX4), 4:自動離着陸(AUX1)
+        if len(self.latest_aux_values) == 4:
+            if self.latest_aux_values[1] > 1100: return 1
+            elif self.latest_aux_values[2] > 1100: return 2
+            elif self.latest_aux_values[3] > 1100: return 3
+            elif self.latest_aux_values[0] > 1100: return 4
+        return 0 # Manual
+
+    def send_control_data(self):
+        """PC側で計算した制御データをシリアルポートに送信する"""
+        if not self.is_connected or not self.serial_connection.is_open:
+            return
+
+        # 操舵量は後で計算するため、現在は仮の値を送信
+        aileron_cmd = 1500
+        elevator_cmd = 1500
+        rudder_cmd = 1500
+        throttle_cmd = 1000
+
+        mission_mode = self.get_mission_mode()
+        
+        # AUXチャンネルの操作 (bitmask)
+        aux_bitmask = 0
+        if len(self.latest_aux_values) == 4:
+            for i, val in enumerate(self.latest_aux_values):
+                if val > 1100:
+                    aux_bitmask |= (1 << i)
+
+        try:
+            data_str = f"{aileron_cmd},{elevator_cmd},{rudder_cmd},{throttle_cmd},{mission_mode},{aux_bitmask}\n"
+            self.serial_connection.write(data_str.encode('utf-8'))
+        except serial.SerialException as e:
+            print(f"Error sending control data: {e}")
+            self.toggle_connection() # Assume connection is lost
+        except Exception as e:
+            print(f"An unexpected error occurred while sending data: {e}")
 
     def update_2d_attitude(self):
         """2D姿勢表示を更新"""
@@ -392,7 +507,7 @@ class TelemetryApp(QMainWindow):
         bytes_per_line = ch * w
         convert_to_Qt_format = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format_RGB888)
         p = QPixmap.fromImage(convert_to_Qt_format)
-        return p.scaled(420, 320, Qt.KeepAspectRatio)
+        return p.scaled(self.video_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
 
     def update_com_ports(self):
         self.com_port_combo.clear()
@@ -454,12 +569,13 @@ class TelemetryApp(QMainWindow):
             parts = [float(p) for p in line.split(',')]
             if len(parts) == 18:
                 roll, pitch, yaw, alt, ail, elev, thro, rudd, aux1, aux2, aux3, aux4, *_ = parts
-                # 姿勢データをバッファに保存
                 self.latest_attitude = {'roll': roll, 'pitch': pitch, 'yaw': yaw}
+                self.latest_aux_values = [aux1, aux2, aux3, aux4]
+
                 self.adi_widget.set_attitude(roll, pitch)
                 self.altitude_label.setText(f"高度: {alt:.1f} m")
                 self.heading_label.setText(f"方位: {yaw:.1f} °")
-                self.update_aux_switches([aux1, aux2, aux3, aux4])
+                self.update_aux_switches(self.latest_aux_values)
                 rud_norm = self.normalize_symmetrical(rudd, 830, 1148, 1500)
                 ele_norm = self.normalize_symmetrical(elev, 800, 966, 1070)
                 rud_norm = -rud_norm
@@ -477,28 +593,27 @@ class TelemetryApp(QMainWindow):
         on_style = "background-color: #28a745; color: white; padding: 5px; border-radius: 3px;"
         off_style = "background-color: #555; color: white; padding: 5px; border-radius: 3px;"
 
-        mission_text = "なし"
-        missions = {
-            1: "水平旋回",  # AUX2
-            2: "上昇旋回",  # AUX3
-            3: "八の字旋回" # AUX4
+        mission_map = {
+            1: "水平旋回",
+            2: "八の字飛行",
+            3: "上昇旋回",
+            4: "自動離着陸"
         }
-
-        for i, value in enumerate(aux_values):
-            label = self.aux_labels[i]
-            is_on = value > 1100
-
-            if is_on:
-                label.setText(f"AUX{i+1}: ON")
-                label.setStyleSheet(on_style)
-                # i は 0-3, missionsのキーは 1-3
-                if i in missions:
-                    mission_text = missions[i]
-            else:
-                label.setText(f"AUX{i+1}: OFF")
-                label.setStyleSheet(off_style)
+        mission_mode = self.get_mission_mode()
+        mission_text = mission_map.get(mission_mode, "手動操縦")
 
         self.mission_status_label.setText(f"ミッション: {mission_text}")
+
+        if len(aux_values) == 4:
+            for i, value in enumerate(aux_values):
+                label = self.aux_labels[i]
+                is_on = value > 1100
+                if is_on:
+                    label.setText(f"AUX{i+1}: ON")
+                    label.setStyleSheet(on_style)
+                else:
+                    label.setText(f"AUX{i+1}: OFF")
+                    label.setStyleSheet(off_style)
 
     def closeEvent(self, event):
         if self.video_thread and self.video_thread.isRunning():
