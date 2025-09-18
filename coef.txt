@@ -16,10 +16,10 @@
     "altitude_low": "2.5",
     "altitude_high": "5.0",
     "autopilot_throttle_base": "660",
-    "altitude_throttle_gain": "5",
+    "altitude_throttle_gain": "30",
     "throttle_min": "400.0",
     "throttle_max": "700",
     "aileron_rudder_mix": "0",
-    "rudder_trim_right": "0.5",
-    "rudder_trim_left": "-0.5"
+    "rudder_trim_right": "0.4",
+    "rudder_trim_left": "-0.4"
 }

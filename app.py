@@ -1018,6 +1018,7 @@ class TelemetryApp(QMainWindow):
         if self.active_mission_mode == 1: # Horizontal Turn
             target_roll = self.current_autopilot_params.get('bank_angle', 20)
             self.alt_pid.setpoint = self.mission_start_altitude
+            # 水平旋回：ミッション開始時の高度を維持
             target_altitude = self.mission_start_altitude
             horizontal_target = self.current_autopilot_params.get('horizontal_turn_target', 760)
             if abs(self.yaw_diff) > horizontal_target:
@@ -1025,13 +1026,25 @@ class TelemetryApp(QMainWindow):
         elif self.active_mission_mode == 2: # Ascending Turn
             # 上昇旋回時は負のバンク角（水平旋回と逆方向）
             target_roll = -self.current_autopilot_params.get('bank_angle', 20)
-            target_altitude = self.current_autopilot_params.get('altitude_high', 5.0)  # 上昇目標高度
             ascending_target = abs(self.current_autopilot_params.get('ascending_turn_target1', -760))
+
+            # 上昇旋回：上昇中かどうかで目標高度を切り替え
+            target_altitude_high = self.current_autopilot_params.get('altitude_high', 5.0)
+            current_alt_m = current_alt / 1000.0  # mm -> m
+
+            # 上昇中（目標高度に達していない場合）は上昇後高度を目標とする
+            if current_alt_m < target_altitude_high:
+                target_altitude = target_altitude_high  # 上昇目標高度
+            else:
+                # 上昇完了後はミッション開始時の高度を基準とする
+                target_altitude = self.mission_start_altitude
+
             if abs(self.yaw_diff) > ascending_target:
                 self.mission_status_label.setText("ミッション: 上昇旋回 成功")
         elif self.active_mission_mode == 3: # Figure-8 Turn
             # 八の字旋回：右旋回から入り、目標角到達で左バンクに切り替え
             self.alt_pid.setpoint = self.mission_start_altitude
+            # 八の字旋回：ミッション開始時の高度を維持
             target_altitude = self.mission_start_altitude
 
             right_target = self.current_autopilot_params.get('figure8_right_target', 300)
@@ -1056,11 +1069,23 @@ class TelemetryApp(QMainWindow):
                 # ミッション完了後は水平飛行
                 target_roll = 0
         else:
-            # 手動操縦時
+            # 手動操縦時：ミッション開始時の高度を基準とする
             target_altitude = self.mission_start_altitude
 
         # 高度誤差に基づくスロットル制御
-        altitude_error_m = (target_altitude - current_alt / 1000.0)  # 高度をm単位に変換
+        current_alt_m = current_alt / 1000.0  # 高度をmm -> m単位に変換
+
+        if self.active_mission_mode == 2:  # 上昇旋回の特別処理
+            target_altitude_high = self.current_autopilot_params.get('altitude_high', 5.0)
+            # 上昇中は目標高度との差分、上昇完了後はミッション開始時高度との差分
+            if current_alt_m < target_altitude_high:
+                altitude_error_m = target_altitude_high - current_alt_m
+            else:
+                altitude_error_m = self.mission_start_altitude / 1000.0 - current_alt_m
+        else:
+            # その他のミッション：ミッション開始時の高度との差分
+            altitude_error_m = self.mission_start_altitude / 1000.0 - current_alt_m
+
         throttle_adjustment = altitude_error_m * altitude_gain
         target_throttle = base_throttle + throttle_adjustment
 
