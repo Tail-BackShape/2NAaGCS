@@ -357,8 +357,13 @@ class TelemetryApp(QMainWindow):
         ("八の字左旋回角 (度)", "figure8_left_target", "-320.0"),
         ("上昇前高度 (m)", "altitude_low", "2.5"),
         ("上昇後高度 (m)", "altitude_high", "5.0"),
-        ("自動スロットル標準", "autopilot_throttle", "1300.0"),
+        ("自動スロットル基準", "autopilot_throttle_base", "700.0"),
+        ("高度制御スロットルゲイン", "altitude_throttle_gain", "20.0"),
+        ("スロットル最小値", "throttle_min", "400.0"),
+        ("スロットル最大値", "throttle_max", "1000.0"),
         ("エルロン→ラダーミキシング", "aileron_rudder_mix", "0.3"),
+        ("右旋回ラダートリム", "rudder_trim_right", "0.1"),
+        ("左旋回ラダートリム", "rudder_trim_left", "-0.1"),
     ]
 
     RC_RANGES = {
@@ -482,15 +487,27 @@ class TelemetryApp(QMainWindow):
         print("PID controllers initialized/updated.")
 
     def update_and_save_pid_gains(self):
-        gains_to_save = {}
         try:
+            # 現在のPIDゲインを更新
             for _, key, _ in self.GAINS_TO_TUNE:
                 value_str = self.pid_gain_edits[key].text()
                 self.current_pid_gains[key] = float(value_str)
-                gains_to_save[key] = value_str
 
+            # 既存のcoef.txtデータを読み込み
+            existing_data = {}
+            try:
+                with open("coef.txt", "r") as f:
+                    existing_data = json.load(f)
+            except FileNotFoundError:
+                pass
+
+            # PIDゲインを既存データに追加/更新
+            for _, key, _ in self.GAINS_TO_TUNE:
+                existing_data[key] = self.pid_gain_edits[key].text()
+
+            # ファイルに保存
             with open("coef.txt", "w") as f:
-                json.dump(gains_to_save, f, indent=4)
+                json.dump(existing_data, f, indent=4)
 
             print(f"PID gains updated and saved: {self.current_pid_gains}")
             self._init_pid_controllers()
@@ -521,14 +538,13 @@ class TelemetryApp(QMainWindow):
         self._init_pid_controllers()
 
     def update_and_save_autopilot_params(self):
-        params_to_save = {}
         try:
+            # 現在の自動操縦パラメータを更新
             for _, key, _ in self.AUTOPILOT_PARAMS:
                 value_str = self.autopilot_param_edits[key].text()
                 self.current_autopilot_params[key] = float(value_str)
-                params_to_save[key] = value_str
 
-            # Load existing coef.txt data and add autopilot params
+            # 既存のcoef.txtデータを読み込み
             existing_data = {}
             try:
                 with open("coef.txt", "r") as f:
@@ -536,8 +552,11 @@ class TelemetryApp(QMainWindow):
             except FileNotFoundError:
                 pass
 
-            existing_data.update(params_to_save)
+            # 自動操縦パラメータを既存データに追加/更新
+            for _, key, _ in self.AUTOPILOT_PARAMS:
+                existing_data[key] = self.autopilot_param_edits[key].text()
 
+            # ファイルに保存
             with open("coef.txt", "w") as f:
                 json.dump(existing_data, f, indent=4)
 
@@ -545,6 +564,7 @@ class TelemetryApp(QMainWindow):
         except ValueError as e:
             print(f"自動操縦パラメータの値が不正です: {e}")
         except Exception as e:
+            print(f"自動操縦パラメータの保存中にエラーが発生しました: {e}")
             print(f"自動操縦パラメータの保存中にエラーが発生しました: {e}")
 
     def load_autopilot_params(self):
@@ -830,6 +850,12 @@ class TelemetryApp(QMainWindow):
             parts = [float(p) for p in line.split(',')]
             if len(parts) == 18:
                 roll, pitch, yaw, alt, ail, elev, thro, rudd, aux1, aux2, aux3, aux4, *_ = parts
+                # 0.0の場合は前回値を使用
+                prev = self.latest_attitude
+                roll = roll if roll != 0.0 else prev.get('roll', 0.0)
+                pitch = pitch if pitch != 0.0 else prev.get('pitch', 0.0)
+                yaw = yaw if yaw != 0.0 else prev.get('yaw', 0.0)
+                alt = alt if alt != 0.0 else prev.get('alt', 0.0)
                 self.latest_attitude = {'roll': roll, 'pitch': pitch, 'yaw': yaw, 'alt': alt}
 
                 self.adi_widget.set_attitude(roll, pitch)
@@ -982,23 +1008,31 @@ class TelemetryApp(QMainWindow):
 
         target_roll = 0
         target_pitch = 0
-        target_throttle = int(self.current_autopilot_params.get('autopilot_throttle', 1300))
+
+        # スロットル制御：高度誤差に基づく調整
+        base_throttle = self.current_autopilot_params.get('autopilot_throttle_base', 700)
+        altitude_gain = self.current_autopilot_params.get('altitude_throttle_gain', 20.0)
+        throttle_min = self.current_autopilot_params.get('throttle_min', 400)
+        throttle_max = self.current_autopilot_params.get('throttle_max', 1000)
 
         if self.active_mission_mode == 1: # Horizontal Turn
             target_roll = self.current_autopilot_params.get('bank_angle', 20)
             self.alt_pid.setpoint = self.mission_start_altitude
+            target_altitude = self.mission_start_altitude
             horizontal_target = self.current_autopilot_params.get('horizontal_turn_target', 760)
             if abs(self.yaw_diff) > horizontal_target:
                 self.mission_status_label.setText("ミッション: 水平旋回 成功")
         elif self.active_mission_mode == 2: # Ascending Turn
             # 上昇旋回時は負のバンク角（水平旋回と逆方向）
             target_roll = -self.current_autopilot_params.get('bank_angle', 20)
+            target_altitude = self.current_autopilot_params.get('altitude_high', 5.0)  # 上昇目標高度
             ascending_target = abs(self.current_autopilot_params.get('ascending_turn_target1', -760))
             if abs(self.yaw_diff) > ascending_target:
                 self.mission_status_label.setText("ミッション: 上昇旋回 成功")
         elif self.active_mission_mode == 3: # Figure-8 Turn
             # 八の字旋回：右旋回から入り、目標角到達で左バンクに切り替え
             self.alt_pid.setpoint = self.mission_start_altitude
+            target_altitude = self.mission_start_altitude
 
             right_target = self.current_autopilot_params.get('figure8_right_target', 300)
             left_target = self.current_autopilot_params.get('figure8_left_target', -320)
@@ -1021,6 +1055,18 @@ class TelemetryApp(QMainWindow):
             else:
                 # ミッション完了後は水平飛行
                 target_roll = 0
+        else:
+            # 手動操縦時
+            target_altitude = self.mission_start_altitude
+
+        # 高度誤差に基づくスロットル制御
+        altitude_error_m = (target_altitude - current_alt / 1000.0)  # 高度をm単位に変換
+        throttle_adjustment = altitude_error_m * altitude_gain
+        target_throttle = base_throttle + throttle_adjustment
+
+        # スロットル値を制限
+        target_throttle = max(throttle_min, min(target_throttle, throttle_max))
+        target_throttle = int(target_throttle)
 
         target_pitch_from_alt = self.alt_pid.update(current_alt, dt)
         final_target_pitch = target_pitch_from_alt + target_pitch
@@ -1033,6 +1079,20 @@ class TelemetryApp(QMainWindow):
         # エルロン→ラダーミキシング
         aileron_rudder_mix_coef = self.current_autopilot_params.get('aileron_rudder_mix', 0.3)
         rudd_out = ail_out * aileron_rudder_mix_coef
+
+        # 自動旋回系ミッションでラダートリムを適用
+        if self.active_mission_mode in [1, 2, 3]:  # 水平旋回、上昇旋回、八の字旋回
+            if self.active_mission_mode == 1:  # 水平旋回（右旋回）
+                rudder_trim = self.current_autopilot_params.get('rudder_trim_right', 0.1)
+            elif self.active_mission_mode == 2:  # 上昇旋回（左旋回）
+                rudder_trim = self.current_autopilot_params.get('rudder_trim_left', -0.1)
+            elif self.active_mission_mode == 3:  # 八の字旋回
+                if self.figure8_phase == 0:  # 右旋回フェーズ
+                    rudder_trim = self.current_autopilot_params.get('rudder_trim_right', 0.1)
+                else:  # 左旋回フェーズ
+                    rudder_trim = self.current_autopilot_params.get('rudder_trim_left', -0.1)
+
+            rudd_out += rudder_trim
 
         """
         # デバッグ情報（必要に応じて）
