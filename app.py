@@ -130,10 +130,10 @@ class AltimeterWidget(QWidget):
         super().__init__(parent)
         self.setFixedSize(80, 200)
         self._altitude = 0
-        self._max_display_alt = 100 # max altitude for the bar display
+        self._max_display_alt = 15 # max altitude for the bar display
 
     def set_altitude(self, altitude):
-        self._altitude = altitude
+        self._altitude = altitude * 0.001
         self.update()
 
     def paintEvent(self, event):
@@ -1085,7 +1085,8 @@ class TelemetryApp(QMainWindow):
 
     def send_serial_command(self, commands):
         try:
-            command_str = f"A,{int(commands['ail'])},{int(commands['elev'])},{int(commands['rudd'])},{int(commands['thro'])},{self.active_mission_mode},1500\n"
+            # データ送信フォーマット: エルロン,エレベータ,ラダー,スロットル,ミッションモード,AUXチャンネル
+            command_str = f"{int(commands['ail'])},{int(commands['elev'])},{int(commands['rudd'])},{int(commands['thro'])},{self.active_mission_mode},1500\n"
             if self.serial_connection and self.serial_connection.is_open:
                 self.serial_connection.write(command_str.encode('utf-8'))
         except Exception as e:
