@@ -850,12 +850,19 @@ class TelemetryApp(QMainWindow):
             parts = [float(p) for p in line.split(',')]
             if len(parts) == 18:
                 roll, pitch, yaw, alt, ail, elev, thro, rudd, aux1, aux2, aux3, aux4, *_ = parts
-                # 0.0の場合は前回値を使用
+                # 前回値を取得
                 prev = self.latest_attitude
-                roll = roll if roll != 0.0 else prev.get('roll', 0.0)
-                pitch = pitch if pitch != 0.0 else prev.get('pitch', 0.0)
-                yaw = yaw if yaw != 0.0 else prev.get('yaw', 0.0)
-                alt = alt if alt != 0.0 else prev.get('alt', 0.0)
+                prev_roll = prev.get('roll', 0.0)
+                prev_pitch = prev.get('pitch', 0.0)
+                prev_yaw = prev.get('yaw', 0.0)
+                prev_alt = prev.get('alt', 0.0)
+
+                # 0.0の場合または前回と10度以上違う場合は前回値を使用
+                roll = roll if (roll != 0.0 and abs(roll - prev_roll) < 10.0) else prev_roll
+                pitch = pitch if (pitch != 0.0 and abs(pitch - prev_pitch) < 10.0) else prev_pitch
+                yaw = yaw if (yaw != 0.0 and abs(yaw - prev_yaw) < 10.0) else prev_yaw
+                alt = alt if (alt != 0.0 and abs(alt - prev_alt) < 10.0) else prev_alt
+
                 self.latest_attitude = {'roll': roll, 'pitch': pitch, 'yaw': yaw, 'alt': alt}
 
                 self.adi_widget.set_attitude(roll, pitch)
