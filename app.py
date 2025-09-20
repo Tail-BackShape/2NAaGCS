@@ -11,7 +11,8 @@ import json
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QGroupBox, QFormLayout, QComboBox, QPushButton, QLabel, QGridLayout, QLineEdit, QCheckBox
+    QGroupBox, QFormLayout, QComboBox, QPushButton, QLabel, QGridLayout, QLineEdit, QCheckBox,
+    QTabWidget
 )
 from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QPolygonF, QImage, QPixmap, QTransform, QLinearGradient
@@ -340,6 +341,122 @@ class Attitude2DWidget(QWidget):
                 painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignTop,
                                f"現在: {self._angle:.1f}°")
 
+# --- Position Visualization Widgets for Auto Landing ---
+class PositionVisualizationWidget(QWidget):
+    def __init__(self, view_type="XY", parent=None):
+        super().__init__(parent)
+        self.setMinimumSize(400, 300)
+        self.view_type = view_type  # "XY" or "ZY"
+        self.aircraft_pos = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+        self.aruco_markers = {
+            1: {'x': -3.0, 'y': 6.0, 'z': 0.0, 'detected': False},
+            2: {'x': 0.0, 'y': 0.0, 'z': 0.0, 'detected': False},
+            3: {'x': 3.0, 'y': 6.0, 'z': 0.0, 'detected': False}
+        }
+        self.scale = 10.0  # pixels per meter
+
+    def set_aircraft_position(self, x, y, z):
+        self.aircraft_pos = {'x': x, 'y': y, 'z': z}
+        self.update()
+
+    def set_marker_detection(self, marker_id, detected):
+        if marker_id in self.aruco_markers:
+            self.aruco_markers[marker_id]['detected'] = detected
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Background
+        painter.fillRect(self.rect(), QColor("#2b2b2b"))
+
+        # Get widget center
+        center_x = self.width() / 2
+        center_y = self.height() / 2
+
+        # Draw coordinate grid
+        painter.setPen(QPen(QColor("gray"), 1, Qt.DashLine))
+        for i in range(-20, 21, 5):
+            # Vertical lines
+            x_pos = center_x + i * self.scale
+            if 0 <= x_pos <= self.width():
+                painter.drawLine(x_pos, 0, x_pos, self.height())
+
+            # Horizontal lines
+            y_pos = center_y - i * self.scale
+            if 0 <= y_pos <= self.height():
+                painter.drawLine(0, y_pos, self.width(), y_pos)
+
+        # Draw axes
+        painter.setPen(QPen(QColor("white"), 2))
+        painter.drawLine(center_x, 0, center_x, self.height())  # Y axis
+        painter.drawLine(0, center_y, self.width(), center_y)   # X axis
+
+        # Draw runway representation
+        painter.setPen(QPen(QColor("yellow"), 3))
+        if self.view_type == "XY":
+            # Runway from Y=0 to Y=33
+            runway_start_y = center_y
+            runway_end_y = center_y - 33 * self.scale
+            painter.drawLine(center_x - 10, runway_start_y, center_x + 10, runway_start_y)
+            painter.drawLine(center_x - 10, runway_end_y, center_x + 10, runway_end_y)
+            painter.drawLine(center_x, runway_start_y, center_x, runway_end_y)
+
+        # Draw ArUco markers
+        for marker_id, marker in self.aruco_markers.items():
+            if self.view_type == "XY":
+                marker_x = center_x + marker['x'] * self.scale
+                marker_y = center_y - marker['y'] * self.scale
+            else:  # ZY view
+                marker_x = center_x + marker['y'] * self.scale  # Y becomes horizontal
+                marker_y = center_y - marker['z'] * self.scale  # Z becomes vertical
+
+            color = QColor("lime") if marker['detected'] else QColor("red")
+            painter.setPen(QPen(color, 2))
+            painter.setBrush(color)
+            painter.drawEllipse(QPointF(marker_x, marker_y), 5, 5)
+
+            # Draw marker ID
+            painter.setPen(QPen(QColor("white"), 1))
+            painter.drawText(marker_x + 10, marker_y, f"ID{marker_id}")
+
+        # Draw aircraft position
+        if self.view_type == "XY":
+            aircraft_x = center_x + self.aircraft_pos['x'] * self.scale
+            aircraft_y = center_y - self.aircraft_pos['y'] * self.scale
+        else:  # ZY view
+            aircraft_x = center_x + self.aircraft_pos['y'] * self.scale
+            aircraft_y = center_y - self.aircraft_pos['z'] * self.scale
+
+        painter.setPen(QPen(QColor("cyan"), 3))
+        painter.setBrush(QColor("cyan"))
+        # Draw aircraft as triangle
+        aircraft_size = 8
+        triangle = QPolygonF([
+            QPointF(aircraft_x, aircraft_y - aircraft_size),
+            QPointF(aircraft_x - aircraft_size/2, aircraft_y + aircraft_size/2),
+            QPointF(aircraft_x + aircraft_size/2, aircraft_y + aircraft_size/2)
+        ])
+        painter.drawPolygon(triangle)
+
+        # Draw labels
+        painter.setPen(QPen(QColor("white"), 1))
+        font = painter.font()
+        font.setPointSize(10)
+        painter.setFont(font)
+
+        title = f"{self.view_type}平面表示"
+        painter.drawText(10, 20, title)
+
+        # Draw axis labels
+        if self.view_type == "XY":
+            painter.drawText(self.width() - 30, center_y - 10, "X")
+            painter.drawText(center_x + 10, 15, "Y")
+        else:
+            painter.drawText(self.width() - 30, center_y - 10, "Y")
+            painter.drawText(center_x + 10, 15, "Z")
+
 # --- Main Application Window ---
 class TelemetryApp(QMainWindow):
     GAINS_TO_TUNE = [
@@ -364,6 +481,20 @@ class TelemetryApp(QMainWindow):
         ("エルロン→ラダーミキシング", "aileron_rudder_mix", "0.3"),
         ("右旋回ラダートリム", "rudder_trim_right", "0.1"),
         ("左旋回ラダートリム", "rudder_trim_left", "-0.1"),
+    ]
+
+    # 自動離着陸パラメータ
+    AUTO_LANDING_PARAMS = [
+        ("離陸スロットル", "takeoff_throttle", "1000.0"),
+        ("投下前標準スロットル", "pre_drop_throttle", "700.0"),
+        ("投下後標準スロットル", "post_drop_throttle", "650.0"),
+        ("定常飛行高度 (m)", "steady_altitude", "1.5"),
+        ("高度維持ゲイン", "altitude_gain", "50.0"),
+        ("ラダー制御ゲイン", "rudder_gain", "0.5"),
+        ("離陸フェーズ距離閾値 (m)", "takeoff_distance_threshold", "30.0"),
+        ("投下フェーズ距離閾値 (m)", "drop_distance_threshold", "20.0"),
+        ("定常フェーズ距離閾値 (m)", "steady_distance_threshold", "10.0"),
+        ("着陸フェーズ距離閾値 (m)", "landing_distance_threshold", "5.0"),
     ]
 
     RC_RANGES = {
@@ -409,10 +540,25 @@ class TelemetryApp(QMainWindow):
         # --- Figure-8 Mission State ---
         self.figure8_phase = 0  # 0: 右旋回フェーズ, 1: 左旋回フェーズ
         self.figure8_completed = False
+        self.figure8_phase_start_yaw = 0  # 左旋回フェーズ開始時のyaw_diff値
+
+        # --- Auto Landing State ---
+        self.auto_landing_enabled = False
+        self.auto_landing_phase = 0  # 0: Manual, 1: Takeoff, 2: Drop, 3: Steady, 4: Landing
+        self.estimated_distance = 0.0
+        self.current_position = {'x': 0.0, 'y': 0.0, 'z': 0.0}  # Real world coordinates
+        self.auto_landing_params = {}
+        self.calibration_data = {
+            'point1': {'distance': 5.0, 'size': 100.0},
+            'point2': {'distance': 10.0, 'size': 50.0},
+            'point3': {'distance': 15.0, 'size': 33.3}
+        }
 
         self._setup_ui()
         self.load_pid_gains() # Also initializes PID controllers
         self.load_autopilot_params() # Load autopilot parameters
+        self.load_auto_landing_params() # Load auto landing parameters
+        self.load_auto_landing_ui_params() # Load parameters into UI
         self._setup_timers()
         self.update_com_ports()
 
@@ -433,9 +579,19 @@ class TelemetryApp(QMainWindow):
             return (value - center_in) / span if span > 0 else -1.0
 
     def _setup_ui(self):
-        main_widget = QWidget()
-        self.setCentralWidget(main_widget)
-        main_layout = QHBoxLayout(main_widget)
+        # Create the main tab widget
+        self.tab_widget = QTabWidget()
+        self.setCentralWidget(self.tab_widget)
+
+        # Create GCS tab (existing functionality)
+        self._create_gcs_tab()
+
+        # Create Auto Landing tab (new functionality)
+        self._create_auto_landing_tab()
+
+    def _create_gcs_tab(self):
+        gcs_widget = QWidget()
+        main_layout = QHBoxLayout(gcs_widget)
 
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
@@ -468,6 +624,155 @@ class TelemetryApp(QMainWindow):
         self.right_layout.addWidget(top_right_widget, 1)
         self._setup_2d_attitude_display(right_panel)
 
+        # Add GCS tab to tab widget
+        self.tab_widget.addTab(gcs_widget, "GCS")
+
+    def _create_auto_landing_tab(self):
+        auto_landing_widget = QWidget()
+        main_layout = QHBoxLayout(auto_landing_widget)
+
+        # Left panel: Control inputs
+        left_panel = self._create_auto_landing_left_panel()
+        main_layout.addWidget(left_panel, 1)
+
+        # Center panel: Position and attitude visualization
+        center_panel = self._create_auto_landing_center_panel()
+        main_layout.addWidget(center_panel, 2)
+
+        # Right panel: Parameter panels
+        right_panel = self._create_auto_landing_right_panel()
+        main_layout.addWidget(right_panel, 1)
+
+        # Add Auto Landing tab to tab widget
+        self.tab_widget.addTab(auto_landing_widget, "自動離着陸")
+
+    def _create_auto_landing_left_panel(self):
+        """Create left panel for auto landing tab - Control inputs display"""
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+
+        # Auto landing stick displays (reuse existing StickWidget)
+        control_group = QGroupBox("操縦量")
+        control_layout = QGridLayout(control_group)
+
+        self.auto_left_stick = StickWidget("ラダー", "エレベーター")
+        self.auto_right_stick = StickWidget("エルロン", "スロットル")
+        self.auto_left_stick_label = QLabel("R: 0, E: 0")
+        self.auto_right_stick_label = QLabel("A: 0, T: 0")
+
+        control_layout.addWidget(self.auto_left_stick, 0, 0)
+        control_layout.addWidget(self.auto_right_stick, 0, 1)
+        control_layout.addWidget(self.auto_left_stick_label, 1, 0, Qt.AlignCenter)
+        control_layout.addWidget(self.auto_right_stick_label, 1, 1, Qt.AlignCenter)
+
+        layout.addWidget(control_group)
+        layout.addStretch()
+
+        return panel
+
+    def _create_auto_landing_center_panel(self):
+        """Create center panel for auto landing tab - Position and attitude visualization"""
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+
+        # Position visualization
+        position_group = QGroupBox("位置表示")
+        position_layout = QHBoxLayout(position_group)
+
+        self.xy_position_widget = PositionVisualizationWidget("XY")
+        self.zy_position_widget = PositionVisualizationWidget("ZY")
+
+        position_layout.addWidget(self.xy_position_widget)
+        position_layout.addWidget(self.zy_position_widget)
+
+        # 2D Attitude display for auto landing (Pitch and Yaw only)
+        attitude_group = QGroupBox("姿勢表示")
+        attitude_layout = QHBoxLayout(attitude_group)
+
+        self.auto_pitch_widget = Attitude2DWidget("2NAa_pitch.png")
+        self.auto_yaw_widget = Attitude2DWidget("2NAa_yaw.png")
+
+        attitude_layout.addWidget(self.auto_pitch_widget)
+        attitude_layout.addWidget(self.auto_yaw_widget)
+
+        layout.addWidget(position_group, 2)
+        layout.addWidget(attitude_group, 1)
+
+        return panel
+
+    def _create_auto_landing_right_panel(self):
+        """Create right panel for auto landing tab - Parameter panels and controls"""
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+
+        # Auto Landing Enable button
+        enable_group = QGroupBox("自動離着陸制御")
+        enable_layout = QVBoxLayout(enable_group)
+
+        self.auto_landing_enable_button = QPushButton("自動離着陸有効化")
+        self.auto_landing_enable_button.setCheckable(True)
+        self.auto_landing_enable_button.setStyleSheet(
+            "QPushButton { background-color: #dc3545; color: white; }"
+            "QPushButton:checked { background-color: #28a745; }"
+        )
+        self.auto_landing_enable_button.clicked.connect(self.toggle_auto_landing)
+        enable_layout.addWidget(self.auto_landing_enable_button)
+
+        # Phase display
+        self.phase_label = QLabel("フェーズ: 手動")
+        self.phase_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #FFD700;")
+        enable_layout.addWidget(self.phase_label)
+
+        # Distance display
+        self.distance_label = QLabel("推定距離: -- m")
+        enable_layout.addWidget(self.distance_label)
+
+        # Altitude debug display
+        self.altitude_debug_label = QLabel("高度: -- m (-- mm)")
+        enable_layout.addWidget(self.altitude_debug_label)
+
+        layout.addWidget(enable_group)
+
+        # Calibration panel placeholder
+        calib_group = QGroupBox("キャリブレーション")
+        calib_layout = QFormLayout(calib_group)
+
+        # Calibration distance input
+        self.calib_distance_input = QLineEdit("5.0")
+        self.calib_record_button = QPushButton("現在のサイズを記録")
+        self.calib_record_button.clicked.connect(self.record_calibration_point)
+
+        calib_layout.addRow("基準距離 (m):", self.calib_distance_input)
+        calib_layout.addRow(self.calib_record_button)
+
+        # Show current calibration points
+        self.calib_display = QLabel("キャリブレーション点:\n(未設定)")
+        calib_layout.addRow(self.calib_display)
+
+        layout.addWidget(calib_group)
+
+        # Parameters panel
+        params_group = QGroupBox("制御パラメータ")
+        params_layout = QFormLayout(params_group)
+
+        # Create parameter input fields
+        self.auto_landing_param_edits = {}
+        for label, key, default_value in self.AUTO_LANDING_PARAMS:
+            edit = QLineEdit(default_value)
+            self.auto_landing_param_edits[key] = edit
+            params_layout.addRow(label + ":", edit)
+
+        # Update button
+        update_params_button = QPushButton("パラメータ更新")
+        update_params_button.clicked.connect(self.update_and_save_auto_landing_params)
+        params_layout.addRow(update_params_button)
+
+        layout.addWidget(params_group)
+
+        layout.addStretch()
+
+        return panel
+
     def _setup_timers(self):
         # Telemetry processing timer
         self.telemetry_timer = QTimer(self)
@@ -483,6 +788,157 @@ class TelemetryApp(QMainWindow):
         self.autopilot_timer = QTimer(self)
         self.autopilot_timer.timeout.connect(self.run_autopilot_cycle)
         self.autopilot_timer.start(50) # 20 Hz
+
+        # Auto landing timer
+        self.auto_landing_timer = QTimer(self)
+        self.auto_landing_timer.timeout.connect(self.auto_landing_update_cycle)
+        self.auto_landing_timer.start(100) # 10 Hz
+
+    def auto_landing_update_cycle(self):
+        """Auto landing update cycle - runs at 10Hz"""
+        if self.is_connected:
+            # Calculate position and distance
+            self.calculate_aircraft_position()
+
+            # Update phase based on distance
+            self.update_auto_landing_phase()
+
+            # Run control logic
+            self.run_auto_landing_control()
+
+            # Update auto landing attitude displays
+            if hasattr(self, 'auto_pitch_widget') and hasattr(self, 'auto_yaw_widget'):
+                roll = self.latest_attitude.get('roll', 0)
+                pitch = self.latest_attitude.get('pitch', 0)
+                yaw = self.latest_attitude.get('yaw', 0)
+
+                self.auto_pitch_widget.set_angle(pitch)
+                self.auto_yaw_widget.set_angle(yaw)
+                self.auto_pitch_widget.set_autopilot_active(self.auto_landing_enabled)
+                self.auto_yaw_widget.set_autopilot_active(self.auto_landing_enabled)
+
+    def toggle_auto_landing(self):
+        """Toggle auto landing enable/disable"""
+        self.auto_landing_enabled = self.auto_landing_enable_button.isChecked()
+
+        if self.auto_landing_enabled:
+            print("Auto landing enabled")
+            # Reset PID controllers
+            self.roll_pid.reset()
+            self.pitch_pid.reset()
+            self.alt_pid.reset()
+            self.yaw_pid.reset()
+
+            # Reset phase
+            self.auto_landing_phase = 0
+
+            # Update button text
+            self.auto_landing_enable_button.setText("自動離着陸無効化")
+        else:
+            print("Auto landing disabled")
+            self.auto_landing_phase = 0
+
+            # Clear autopilot displays
+            if hasattr(self, 'auto_left_stick') and hasattr(self, 'auto_right_stick'):
+                self.auto_left_stick.set_autopilot_position(None, None)
+                self.auto_left_stick.set_autopilot_active(False)
+                self.auto_right_stick.set_autopilot_position(None, None)
+                self.auto_right_stick.set_autopilot_active(False)
+
+            # Update button text
+            self.auto_landing_enable_button.setText("自動離着陸有効化")
+
+    def record_calibration_point(self):
+        """Record current marker sizes at specified distance for calibration"""
+        try:
+            distance = float(self.calib_distance_input.text())
+            if distance <= 0:
+                print("Invalid distance for calibration")
+                return
+
+            # Calculate average size from visible markers
+            valid_sizes = []
+            for marker_id, marker_data in self.aruco_markers.items():
+                if marker_data['size'] > 0:
+                    valid_sizes.append(marker_data['size'])
+
+            if not valid_sizes:
+                print("No visible markers for calibration")
+                return
+
+            # Calculate weighted average (larger markers get more weight)
+            if len(valid_sizes) == 2:
+                # 5:5 ratio
+                avg_size = sum(valid_sizes) / len(valid_sizes)
+            else:
+                # 3:3:4 ratio with largest marker getting more weight
+                valid_sizes.sort(reverse=True)  # Largest first
+                if len(valid_sizes) == 3:
+                    avg_size = (valid_sizes[0] * 4 + valid_sizes[1] * 3 + valid_sizes[2] * 3) / 10
+                else:
+                    avg_size = sum(valid_sizes) / len(valid_sizes)
+
+            # Determine which calibration point to update (closest distance)
+            point_key = 'point1'
+            min_diff = abs(distance - self.calibration_data[point_key]['distance'])
+
+            for key in ['point2', 'point3']:
+                diff = abs(distance - self.calibration_data[key]['distance'])
+                if diff < min_diff:
+                    min_diff = diff
+                    point_key = key
+
+            # Update calibration data
+            self.calibration_data[point_key] = {
+                'distance': distance,
+                'size': avg_size
+            }
+
+            # Save to file
+            self.save_auto_landing_params()
+
+            # Update display
+            self.update_calibration_display()
+
+            print(f"Recorded calibration point: {distance}m -> {avg_size} pixels")
+
+        except ValueError:
+            print("Invalid distance value for calibration")
+
+    def update_calibration_display(self):
+        """Update the calibration display"""
+        if hasattr(self, 'calib_display'):
+            calib_text = "キャリブレーション点:\n"
+            for point_name, point_data in self.calibration_data.items():
+                dist = point_data['distance']
+                size = point_data['size']
+                calib_text += f"{point_name}: {dist:.1f}m -> {size:.1f}px\n"
+            self.calib_display.setText(calib_text)
+
+    def update_and_save_auto_landing_params(self):
+        """Update and save auto landing parameters"""
+        try:
+            for key, edit in self.auto_landing_param_edits.items():
+                value = float(edit.text())
+                self.auto_landing_params[key] = value
+
+            self.save_auto_landing_params()
+            print("Auto landing parameters updated and saved")
+
+        except ValueError as e:
+            print(f"自動離着陸パラメータの更新中にエラーが発生しました: {e}")
+        except Exception as e:
+            print(f"パラメータ保存中にエラーが発生しました: {e}")
+
+    def load_auto_landing_ui_params(self):
+        """Load auto landing parameters into UI elements"""
+        # Update parameter input fields
+        for key, edit in self.auto_landing_param_edits.items():
+            if key in self.auto_landing_params:
+                edit.setText(str(self.auto_landing_params[key]))
+
+        # Update calibration display
+        self.update_calibration_display()
 
     def _init_pid_controllers(self):
         gains = self.current_pid_gains
@@ -597,6 +1053,331 @@ class TelemetryApp(QMainWindow):
         for _, key, default_value in self.AUTOPILOT_PARAMS:
             if key not in self.current_autopilot_params:
                 self.current_autopilot_params[key] = float(default_value)
+
+    def load_auto_landing_params(self):
+        """Load auto landing parameters from autoGoCoef.txt"""
+        try:
+            with open("autoGoCoef.txt", "r") as f:
+                data = json.load(f)
+
+            # Load control parameters
+            params = data.get("parameters", {})
+            for key, value in params.items():
+                self.auto_landing_params[key] = float(value)
+
+            # Load calibration data
+            calib = data.get("calibration", {})
+            if calib:
+                self.calibration_data = calib
+
+            print(f"Loaded auto landing parameters from autoGoCoef.txt")
+
+        except FileNotFoundError:
+            print("autoGoCoef.txt not found, using default auto landing parameters.")
+            # Set default values
+            for _, key, default_value in self.AUTO_LANDING_PARAMS:
+                self.auto_landing_params[key] = float(default_value)
+            print(f"Using default auto landing parameters: {self.auto_landing_params}")
+        except Exception as e:
+            print(f"自動離着陸パラメータの読み込み中にエラーが発生しました: {e}")
+            # Set default values on error
+            for _, key, default_value in self.AUTO_LANDING_PARAMS:
+                self.auto_landing_params[key] = float(default_value)
+
+    def save_auto_landing_params(self):
+        """Save auto landing parameters to autoGoCoef.txt"""
+        try:
+            data = {
+                "parameters": self.auto_landing_params,
+                "calibration": self.calibration_data
+            }
+            with open("autoGoCoef.txt", "w") as f:
+                json.dump(data, f, indent=2)
+            print("Auto landing parameters saved to autoGoCoef.txt")
+        except Exception as e:
+            print(f"自動離着陸パラメータの保存中にエラーが発生しました: {e}")
+
+    def estimate_distance_from_markers(self):
+        """Estimate distance using ArUco marker data with 3-point linear interpolation"""
+        valid_markers = []
+
+        # Check which markers have valid data (size > 0)
+        for marker_id, marker_data in self.aruco_markers.items():
+            if marker_data['size'] > 0:
+                valid_markers.append((marker_id, marker_data['size']))
+
+        if not valid_markers:
+            return 0.0
+
+        # Calculate weighted distance estimates
+        distance_estimates = []
+        total_weight = 0.0
+
+        for marker_id, size in valid_markers:
+            distance_est = self.interpolate_distance_from_size(size)
+            if distance_est > 0:
+                weight = size  # Larger markers get more weight
+                distance_estimates.append((distance_est, weight))
+                total_weight += weight
+
+        if not distance_estimates:
+            return 0.0
+
+        # Calculate weighted average
+        weighted_distance = sum(dist * weight for dist, weight in distance_estimates) / total_weight
+        return weighted_distance
+
+    def interpolate_distance_from_size(self, size):
+        """Linear interpolation using 3 calibration points"""
+        calib = self.calibration_data
+        points = []
+
+        # Get calibration points
+        for point_name in ['point1', 'point2', 'point3']:
+            if point_name in calib:
+                points.append((calib[point_name]['distance'], calib[point_name]['size']))
+
+        if len(points) < 2:
+            # Fallback to simple inverse relationship
+            return 100.0 / size if size > 0 else 0.0
+
+        # Sort by distance
+        points.sort()
+
+        # Find the right interval for interpolation
+        for i in range(len(points) - 1):
+            dist1, size1 = points[i]
+            dist2, size2 = points[i + 1]
+
+            if size2 <= size <= size1:  # Larger size = smaller distance
+                # Linear interpolation
+                if size1 != size2:
+                    ratio = (size - size2) / (size1 - size2)
+                    distance = dist2 + ratio * (dist1 - dist2)
+                    return distance
+
+        # Extrapolation
+        if len(points) >= 2:
+            if size > points[0][1]:  # Closer than closest calibration point
+                dist1, size1 = points[0]
+                dist2, size2 = points[1]
+            else:  # Farther than farthest calibration point
+                dist1, size1 = points[-2]
+                dist2, size2 = points[-1]
+
+            if size1 != size2:
+                ratio = (size - size2) / (size1 - size2)
+                distance = dist2 + ratio * (dist1 - dist2)
+                return max(0.0, distance)  # Don't allow negative distances
+
+        return 0.0
+
+    def calculate_aircraft_position(self):
+        """Calculate aircraft position from ArUco marker data and estimated distance"""
+        distance = self.estimate_distance_from_markers()
+
+        if distance <= 0:
+            return
+
+        self.estimated_distance = distance
+
+        # For now, use simple positioning based on visible markers
+        # This is a simplified implementation - in reality you'd need more sophisticated
+        # camera calibration and pose estimation
+
+        valid_markers = []
+        for marker_id, marker_data in self.aruco_markers.items():
+            if marker_data['size'] > 0:
+                valid_markers.append(marker_id)
+
+        if not valid_markers:
+            return
+
+        # Simple positioning logic based on camera coordinates
+        # Camera image is 400x300, center at (200, 150)
+        camera_center_x = 200
+        camera_center_y = 150
+
+        # Use marker ID 2 (center marker) for primary positioning if available
+        if 2 in valid_markers:
+            marker2 = self.aruco_markers[2]
+            # Convert camera pixel coordinates to real world offset
+            # This is a simplified conversion - real implementation would use camera calibration
+            dx = (marker2['x'] - camera_center_x) * distance * 0.01  # Scale factor
+            dy = (marker2['y'] - camera_center_y) * distance * 0.01
+
+            # Aircraft position relative to marker ID 2 (which is at origin)
+            self.current_position['x'] = -dx  # Negative because camera view is inverted
+            self.current_position['y'] = distance  # Distance from runway
+
+            # 高度データの取得とデバッグ
+            raw_alt = self.latest_attitude.get('alt', 0)
+            self.current_position['z'] = raw_alt / 1000.0  # Convert mm to m
+
+        else:
+            # Use other markers for positioning (simplified)
+            self.current_position['y'] = distance
+            raw_alt = self.latest_attitude.get('alt', 0)
+            self.current_position['z'] = raw_alt / 1000.0
+
+        # Update position visualization
+        if hasattr(self, 'xy_position_widget') and hasattr(self, 'zy_position_widget'):
+            self.xy_position_widget.set_aircraft_position(
+                self.current_position['x'],
+                self.current_position['y'],
+                self.current_position['z']
+            )
+            self.zy_position_widget.set_aircraft_position(
+                self.current_position['x'],
+                self.current_position['y'],
+                self.current_position['z']
+            )
+
+            # Update marker detection status
+            for marker_id, marker_data in self.aruco_markers.items():
+                detected = marker_data['size'] > 0
+                self.xy_position_widget.set_marker_detection(marker_id, detected)
+                self.zy_position_widget.set_marker_detection(marker_id, detected)
+
+    def update_auto_landing_phase(self):
+        """Update auto landing phase based on estimated distance"""
+        if not self.auto_landing_enabled:
+            self.auto_landing_phase = 0  # Manual
+            return
+
+        distance = self.estimated_distance
+
+        # Phase transition logic based on distance thresholds
+        takeoff_threshold = self.auto_landing_params.get('takeoff_distance_threshold', 30.0)
+        drop_threshold = self.auto_landing_params.get('drop_distance_threshold', 20.0)
+        steady_threshold = self.auto_landing_params.get('steady_distance_threshold', 10.0)
+        landing_threshold = self.auto_landing_params.get('landing_distance_threshold', 5.0)
+
+        if distance > takeoff_threshold:
+            new_phase = 1  # Takeoff
+        elif distance > drop_threshold:
+            new_phase = 2  # Drop
+        elif distance > landing_threshold:
+            new_phase = 3  # Steady
+        else:
+            new_phase = 4  # Landing
+
+        if new_phase != self.auto_landing_phase:
+            print(f"Auto landing phase changed from {self.auto_landing_phase} to {new_phase}")
+            self.auto_landing_phase = new_phase
+
+        # Update phase display
+        phase_names = {0: "手動", 1: "離陸", 2: "投下", 3: "定常", 4: "着陸"}
+        if hasattr(self, 'phase_label'):
+            self.phase_label.setText(f"フェーズ: {phase_names.get(self.auto_landing_phase, '不明')}")
+        if hasattr(self, 'distance_label'):
+            self.distance_label.setText(f"推定距離: {distance:.1f} m")
+
+        # Update altitude debug info
+        if hasattr(self, 'altitude_debug_label'):
+            current_alt_mm = self.latest_attitude.get('alt', 0)
+            current_alt_m = current_alt_mm / 1000.0
+            self.altitude_debug_label.setText(f"高度: {current_alt_m:.2f} m ({current_alt_mm:.0f} mm)")
+
+    def run_auto_landing_control(self):
+        """Execute auto landing control logic based on current phase"""
+        if not self.auto_landing_enabled or not self.is_connected:
+            return
+
+        current_alt = self.latest_attitude.get('alt', 0) / 1000.0  # Convert mm to m
+        current_roll = self.latest_attitude.get('roll', 0)
+        current_pitch = self.latest_attitude.get('pitch', 0)
+        current_yaw = self.latest_attitude.get('yaw', 0)
+
+        # Default control values
+        target_roll = 0.0  # Always keep wings level
+        target_pitch = 0.0
+        target_throttle = self.auto_landing_params.get('pre_drop_throttle', 700.0)
+        target_rudder = 0.0
+
+        if self.auto_landing_phase == 1:  # Takeoff phase
+            target_throttle = self.auto_landing_params.get('takeoff_throttle', 1000.0)
+            # Climb to steady altitude
+            steady_alt = self.auto_landing_params.get('steady_altitude', 1.5)
+            if current_alt < steady_alt:
+                target_pitch = 5.0  # Nose up for climb
+
+        elif self.auto_landing_phase == 2:  # Drop phase
+            target_throttle = self.auto_landing_params.get('pre_drop_throttle', 700.0)
+            # Maintain steady altitude
+            steady_alt = self.auto_landing_params.get('steady_altitude', 1.5)
+            altitude_error = steady_alt - current_alt
+            alt_gain = self.auto_landing_params.get('altitude_gain', 50.0)
+            target_throttle += altitude_error * alt_gain
+
+        elif self.auto_landing_phase == 3:  # Steady phase
+            target_throttle = self.auto_landing_params.get('post_drop_throttle', 650.0)
+            # Maintain altitude and center on runway (X=0)
+            steady_alt = self.auto_landing_params.get('steady_altitude', 1.5)
+            altitude_error = steady_alt - current_alt
+            alt_gain = self.auto_landing_params.get('altitude_gain', 50.0)
+            target_throttle += altitude_error * alt_gain
+
+            # Use rudder to center on runway (marker ID 2 should be at camera center)
+            if 2 in self.aruco_markers and self.aruco_markers[2]['size'] > 0:
+                marker_x = self.aruco_markers[2]['x']
+                camera_center_x = 200  # Camera center
+                x_error = marker_x - camera_center_x
+                rudder_gain = self.auto_landing_params.get('rudder_gain', 0.5)
+                target_rudder = -x_error * rudder_gain / 200.0  # Normalize to [-1, 1]
+                target_rudder = max(-1.0, min(1.0, target_rudder))
+
+        elif self.auto_landing_phase == 4:  # Landing phase
+            target_throttle = self.auto_landing_params.get('post_drop_throttle', 650.0) * 0.8  # Reduce throttle
+            # Gentle descent
+            target_pitch = -2.0  # Slight nose down
+
+            # Continue centering on runway
+            if 2 in self.aruco_markers and self.aruco_markers[2]['size'] > 0:
+                marker_x = self.aruco_markers[2]['x']
+                camera_center_x = 200
+                x_error = marker_x - camera_center_x
+                rudder_gain = self.auto_landing_params.get('rudder_gain', 0.5)
+                target_rudder = -x_error * rudder_gain / 200.0
+                target_rudder = max(-1.0, min(1.0, target_rudder))
+
+        # Apply control limits
+        target_throttle = max(400, min(1000, int(target_throttle)))
+        target_roll = max(-30, min(30, target_roll))
+        target_pitch = max(-15, min(15, target_pitch))
+
+        # Convert to RC commands using existing PID controllers
+        dt = 0.05
+        self.roll_pid.setpoint = target_roll
+        self.pitch_pid.setpoint = target_pitch
+
+        aileron_cmd = self.roll_pid.update(current_roll, dt)
+        elevator_cmd = self.pitch_pid.update(current_pitch, dt)
+
+        # Convert normalized commands to RC values
+        aileron_rc = self.denormalize_symmetrical(aileron_cmd, 'ail')
+        elevator_rc = self.denormalize_symmetrical(elevator_cmd, 'elev')
+        rudder_rc = self.denormalize_symmetrical(target_rudder, 'rudd')
+        throttle_rc = int(target_throttle)
+
+        # Send commands
+        commands = [aileron_rc, elevator_rc, rudder_rc, throttle_rc]
+        self.send_serial_command(commands)
+
+        # Update auto landing stick displays
+        if hasattr(self, 'auto_left_stick') and hasattr(self, 'auto_right_stick'):
+            self.auto_left_stick.set_autopilot_position(target_rudder, elevator_cmd)
+            self.auto_left_stick.set_autopilot_active(True)
+
+            throttle_norm = (target_throttle - 400) / 600.0 - 1.0  # Normalize throttle
+            self.auto_right_stick.set_autopilot_position(aileron_cmd, throttle_norm)
+            self.auto_right_stick.set_autopilot_active(True)
+
+        # Update stick labels
+        if hasattr(self, 'auto_left_stick_label'):
+            self.auto_left_stick_label.setText(f"R: {rudder_rc}, E: {elevator_rc}")
+        if hasattr(self, 'auto_right_stick_label'):
+            self.auto_right_stick_label.setText(f"A: {aileron_rc}, T: {throttle_rc}")
 
     def _create_connection_group(self):
         group = QGroupBox("シリアル接続")
@@ -876,16 +1657,24 @@ class TelemetryApp(QMainWindow):
                 prev_yaw = prev.get('yaw', 0.0)
                 prev_alt = prev.get('alt', 0.0)
 
-                # 0.0の場合または前回と10度以上違う場合は前回値を使用
+                # 姿勢データのフィルタリング（0.0の場合または前回と10度以上違う場合は前回値を使用）
                 roll = roll if (roll != 0.0 and abs(roll - prev_roll) < 10.0) else prev_roll
                 pitch = pitch if (pitch != 0.0 and abs(pitch - prev_pitch) < 10.0) else prev_pitch
                 yaw = yaw if (yaw != 0.0 and abs(yaw - prev_yaw) < 10.0) else prev_yaw
-                alt = alt if (alt != 0.0 and abs(alt - prev_alt) < 10.0) else prev_alt
 
-                self.latest_attitude = {'roll': roll, 'pitch': pitch, 'yaw': yaw, 'alt': alt}
+                # 高度データの処理（0.0の場合のみ前回値を使用、それ以外は送信データをそのまま使用）
+                if alt != 0.0:
+                    filtered_alt = alt
+                    if abs(alt - prev_alt) > 1000.0 and prev_alt != 0.0:  # 1m以上変化した場合にログ出力
+                        print(f"高度変化: {prev_alt:.0f}mm -> {alt:.0f}mm (差: {alt-prev_alt:.0f}mm)")
+                else:
+                    filtered_alt = prev_alt
+                    print(f"高度データが0.0のため前回値({prev_alt:.0f}mm)を使用")
+
+                self.latest_attitude = {'roll': roll, 'pitch': pitch, 'yaw': yaw, 'alt': filtered_alt}
 
                 self.adi_widget.set_attitude(roll, pitch)
-                self.altimeter_widget.set_altitude(alt)
+                self.altimeter_widget.set_altitude(filtered_alt)
                 self.heading_label.setText(f"方位: {yaw:.1f} °")
                 self.update_aux_switches([aux1, aux2, aux3, aux4])
 
@@ -979,11 +1768,14 @@ class TelemetryApp(QMainWindow):
         self.mission_start_yaw = self.latest_attitude.get('yaw', 0)
         self.mission_start_altitude = self.latest_attitude.get('alt', 0)
         self.last_yaw = self.mission_start_yaw
-        self.yaw_diff = 0
+        self.yaw_diff = 0  # ミッション開始時からの累積回転角度（右回り正、左回り負）
+
+        print(f"ミッション開始: 開始ヨー角={self.mission_start_yaw:.1f}°, 開始高度={self.mission_start_altitude/1000.0:.2f}m")
 
         # 八の字旋回の状態をリセット
         self.figure8_phase = 0  # 右旋回から開始
         self.figure8_completed = False
+        self.figure8_phase_start_yaw = 0  # 左旋回フェーズ開始時のyaw_diff値
 
         self.roll_pid.reset()
         self.pitch_pid.reset()
@@ -1021,16 +1813,16 @@ class TelemetryApp(QMainWindow):
         current_yaw = self.latest_attitude.get('yaw', 0)
         dt = 0.05 # 50ms interval
 
-        # ヨー角の差分計算（-180〜180度の範囲で正規化）
+        # ヨー角の差分計算（0-359度システム、右回りが正）
         delta_yaw = current_yaw - self.last_yaw
 
-        # 180度を跨ぐ場合の処理
+        # 359度-0度境界を跨ぐ場合の処理
         if delta_yaw > 180:
-            delta_yaw -= 360  # 例: 350° - 10° = 340° → -20°
+            delta_yaw -= 360  # 例: 350° → 10°へ移動時: 10-350=-340° → -340+360=20°（左回り）
         elif delta_yaw < -180:
-            delta_yaw += 360  # 例: 10° - 350° = -340° → 20°
+            delta_yaw += 360  # 例: 10° → 350°へ移動時: 350-10=340° → 340-360=-20°（右回り）
 
-        # 累積ヨー差分に加算
+        # 累積ヨー差分に加算（右回りが正、左回りが負）
         self.yaw_diff += delta_yaw
         self.last_yaw = current_yaw
 
@@ -1043,18 +1835,21 @@ class TelemetryApp(QMainWindow):
         throttle_min = self.current_autopilot_params.get('throttle_min', 400)
         throttle_max = self.current_autopilot_params.get('throttle_max', 1000)
 
-        if self.active_mission_mode == 1: # Horizontal Turn
+        if self.active_mission_mode == 1: # Horizontal Turn (右旋回)
             target_roll = self.current_autopilot_params.get('bank_angle', 20)
             self.alt_pid.setpoint = self.mission_start_altitude
             # 水平旋回：ミッション開始時の高度を維持
             target_altitude = self.mission_start_altitude
             horizontal_target = self.current_autopilot_params.get('horizontal_turn_target', 760)
-            if abs(self.yaw_diff) > horizontal_target:
+            # 右旋回なので、開始時からの累積回転角yaw_diffが目標角度以上になったら成功
+            if self.yaw_diff >= horizontal_target:
+                current_actual_yaw = current_yaw  # 現在の実際のヨー角（0-359度）
+                print(f"水平旋回成功: 開始角={self.mission_start_yaw:.1f}°, 現在角={current_actual_yaw:.1f}°, 累積回転={self.yaw_diff:.1f}°")
                 self.mission_status_label.setText("ミッション: 水平旋回 成功")
-        elif self.active_mission_mode == 2: # Ascending Turn
-            # 上昇旋回時は負のバンク角（水平旋回と逆方向）
+        elif self.active_mission_mode == 2: # Ascending Turn (左旋回)
+            # 上昇旋回時は負のバンク角（左旋回）
             target_roll = -self.current_autopilot_params.get('bank_angle', 20)
-            ascending_target = abs(self.current_autopilot_params.get('ascending_turn_target1', -760))
+            ascending_target = self.current_autopilot_params.get('ascending_turn_target1', -760)
 
             # 上昇旋回：上昇中かどうかで目標高度を切り替え
             target_altitude_high = self.current_autopilot_params.get('altitude_high', 5.0)
@@ -1067,32 +1862,41 @@ class TelemetryApp(QMainWindow):
                 # 上昇完了後はミッション開始時の高度を基準とする
                 target_altitude = self.mission_start_altitude
 
-            if abs(self.yaw_diff) > ascending_target:
+            # 左旋回なので、開始時からの累積回転角yaw_diffが目標角度以下（負の値）になったら成功
+            if self.yaw_diff <= ascending_target:
+                current_actual_yaw = current_yaw  # 現在の実際のヨー角（0-359度）
+                print(f"上昇旋回成功: 開始角={self.mission_start_yaw:.1f}°, 現在角={current_actual_yaw:.1f}°, 累積回転={self.yaw_diff:.1f}°")
                 self.mission_status_label.setText("ミッション: 上昇旋回 成功")
-        elif self.active_mission_mode == 3: # Figure-8 Turn
+        elif self.active_mission_mode == 3: # Figure-8 Turn (右旋回→左旋回)
             # 八の字旋回：右旋回から入り、目標角到達で左バンクに切り替え
             self.alt_pid.setpoint = self.mission_start_altitude
             # 八の字旋回：ミッション開始時の高度を維持
             target_altitude = self.mission_start_altitude
 
-            right_target = self.current_autopilot_params.get('figure8_right_target', 300)
-            left_target = self.current_autopilot_params.get('figure8_left_target', -320)
+            right_target = self.current_autopilot_params.get('figure8_right_target', 300)  # 右旋回目標（正の値）
+            left_target = abs(self.current_autopilot_params.get('figure8_left_target', -320))  # 左旋回目標（絶対値で使用）
             bank_angle = self.current_autopilot_params.get('bank_angle', 20)
 
             if not self.figure8_completed:
                 if self.figure8_phase == 0:  # 右旋回フェーズ
                     target_roll = bank_angle  # 正のバンク角（右バンク）
+                    # 右旋回なので、開始時からの累積回転角yaw_diffが目標角度以上になったら次フェーズ
                     if self.yaw_diff >= right_target:  # 右旋回目標角に到達
                         self.figure8_phase = 1  # 左旋回フェーズに切り替え
-                        print(f"八の字旋回: 左旋回フェーズに切り替え (yaw_diff: {self.yaw_diff:.1f}°)")
+                        self.figure8_phase_start_yaw = self.yaw_diff  # 左旋回開始時点のyaw_diffを記録
+                        current_actual_yaw = current_yaw
+                        print(f"八の字旋回: 右旋回完了→左旋回開始 (開始角={self.mission_start_yaw:.1f}°, 現在角={current_actual_yaw:.1f}°, 累積回転={self.yaw_diff:.1f}°)")
 
                 elif self.figure8_phase == 1:  # 左旋回フェーズ
                     target_roll = -bank_angle  # 負のバンク角（左バンク）
-                    # 左旋回目標角は負の値なので、yaw_diffがleft_target以下になったら完了
-                    if self.yaw_diff <= left_target:  # 左旋回目標角に到達
+                    # 左旋回の進行度を計算：右旋回完了時点からの相対角度（負の値）
+                    left_turn_progress = self.yaw_diff - self.figure8_phase_start_yaw
+                    # 左旋回でleft_target度以上回転したら完了（left_turn_progressが-left_target以下）
+                    if left_turn_progress <= -left_target:  # 左旋回目標角に到達
                         self.figure8_completed = True
+                        current_actual_yaw = current_yaw
+                        print(f"八の字旋回完了: 開始角={self.mission_start_yaw:.1f}°, 現在角={current_actual_yaw:.1f}°, 総累積={self.yaw_diff:.1f}°, 左旋回進行={left_turn_progress:.1f}°")
                         self.mission_status_label.setText("ミッション: 八の字旋回 成功")
-                        print(f"八の字旋回: 完了 (yaw_diff: {self.yaw_diff:.1f}°)")
             else:
                 # ミッション完了後は水平飛行
                 target_roll = 0
@@ -1105,21 +1909,28 @@ class TelemetryApp(QMainWindow):
 
         if self.active_mission_mode == 2:  # 上昇旋回の特別処理
             target_altitude_high = self.current_autopilot_params.get('altitude_high', 5.0)
-            # 上昇中は目標高度との差分、上昇完了後はミッション開始時高度との差分
+            # 上昇中は目標高度との差分でスロットル制御
             if current_alt_m < target_altitude_high:
                 altitude_error_m = target_altitude_high - current_alt_m
+                throttle_adjustment = altitude_error_m * altitude_gain
+                target_throttle = base_throttle + throttle_adjustment
+                # スロットル値を制限
+                target_throttle = max(throttle_min, min(target_throttle, throttle_max))
+                target_throttle = int(target_throttle)
             else:
-                altitude_error_m = self.mission_start_altitude / 1000.0 - current_alt_m
+                # 上昇完了後（水平旋回時）は水平旋回と同じスロットル制御
+                target_throttle = base_throttle
+        elif self.active_mission_mode == 3:  # 八の字旋回
+            # 八の字旋回は水平旋回と同じスロットル制御
+            target_throttle = base_throttle
         else:
-            # その他のミッション：ミッション開始時の高度との差分
+            # その他のミッション：ミッション開始時の高度との差分でスロットル制御
             altitude_error_m = self.mission_start_altitude / 1000.0 - current_alt_m
-
-        throttle_adjustment = altitude_error_m * altitude_gain
-        target_throttle = base_throttle + throttle_adjustment
-
-        # スロットル値を制限
-        target_throttle = max(throttle_min, min(target_throttle, throttle_max))
-        target_throttle = int(target_throttle)
+            throttle_adjustment = altitude_error_m * altitude_gain
+            target_throttle = base_throttle + throttle_adjustment
+            # スロットル値を制限
+            target_throttle = max(throttle_min, min(target_throttle, throttle_max))
+            target_throttle = int(target_throttle)
 
         target_pitch_from_alt = self.alt_pid.update(current_alt, dt)
         final_target_pitch = target_pitch_from_alt + target_pitch
