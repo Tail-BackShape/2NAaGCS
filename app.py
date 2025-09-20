@@ -399,6 +399,13 @@ class TelemetryApp(QMainWindow):
         self.previous_aux_values = [0, 0, 0, 0]
         self.latest_attitude = {'roll': 0, 'pitch': 0, 'yaw': 0, 'alt': 0}
 
+        # --- ArUco Marker Data ---
+        self.aruco_markers = {
+            1: {'size': 0, 'id': 0, 'x': 0, 'y': 0},
+            2: {'size': 0, 'id': 0, 'x': 0, 'y': 0},
+            3: {'size': 0, 'id': 0, 'x': 0, 'y': 0}
+        }
+
         # --- Figure-8 Mission State ---
         self.figure8_phase = 0  # 0: 右旋回フェーズ, 1: 左旋回フェーズ
         self.figure8_completed = False
@@ -747,7 +754,7 @@ class TelemetryApp(QMainWindow):
     def toggle_video_stream(self):
         if self.video_thread and self.video_thread.isRunning():
             self.video_thread.stop()
-            self.video_toggle_button.setText("配信開始")
+            self.video_toggle_button.setText("FPV")
             self.video_status_label.setText("ステータス: ユーザーにより停止")
             self.video_url_input.setEnabled(True)
         else:
@@ -848,8 +855,20 @@ class TelemetryApp(QMainWindow):
     def parse_and_update_ui(self, line):
         try:
             parts = [float(p) for p in line.split(',')]
-            if len(parts) == 18:
-                roll, pitch, yaw, alt, ail, elev, thro, rudd, aux1, aux2, aux3, aux4, *_ = parts
+            if len(parts) == 24:  # 24パラメータに対応
+                # パラメータ1-12: 既存のテレメトリデータ
+                roll, pitch, yaw, alt, ail, elev, thro, rudd, aux1, aux2, aux3, aux4 = parts[0:12]
+
+                # パラメータ13-24: ArUcoマーカー情報
+                aruco1_size, aruco1_id, aruco1_x, aruco1_y = parts[12:16]
+                aruco2_size, aruco2_id, aruco2_x, aruco2_y = parts[16:20]
+                aruco3_size, aruco3_id, aruco3_x, aruco3_y = parts[20:24]
+
+                # ArUcoマーカー情報を保存
+                self.aruco_markers[1] = {'size': aruco1_size, 'id': int(aruco1_id), 'x': aruco1_x, 'y': aruco1_y}
+                self.aruco_markers[2] = {'size': aruco2_size, 'id': int(aruco2_id), 'x': aruco2_x, 'y': aruco2_y}
+                self.aruco_markers[3] = {'size': aruco3_size, 'id': int(aruco3_id), 'x': aruco3_x, 'y': aruco3_y}
+
                 # 前回値を取得
                 prev = self.latest_attitude
                 prev_roll = prev.get('roll', 0.0)
@@ -886,6 +905,8 @@ class TelemetryApp(QMainWindow):
                 self.left_stick.set_autopilot_active(self.autopilot_active)
                 self.right_stick.set_autopilot_active(self.autopilot_active)
                 self.check_mission_triggers([aux1, aux2, aux3, aux4])
+            else:
+                print(f"データ形式エラー: 24パラメータが必要ですが、{len(parts)}パラメータを受信しました - {line}")
         except (ValueError, IndexError) as e:
             print(f"データ解析エラー: {e} - {line}")
 
