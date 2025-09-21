@@ -16,7 +16,7 @@
     "altitude_low": "2.5",
     "altitude_high": "5.0",
     "autopilot_throttle_base": "780",
-    "altitude_throttle_gain": "30",
+    "altitude_throttle_gain": "20",
     "throttle_min": "600",
     "throttle_max": "900",
     "aileron_rudder_mix": "0",

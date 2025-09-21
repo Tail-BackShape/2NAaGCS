@@ -524,8 +524,11 @@ class TelemetryApp(QMainWindow):
         self.active_mission_mode = 0  # 0: Manual, 1: Horizontal, 2: Ascending, 3: Fig-8
         self.mission_start_yaw = 0
         self.mission_start_altitude = 0
-        self.yaw_diff = 0
-        self.last_yaw = 0
+        # 新しいヨー角追跡システム
+        self.mission_total_rotation = 0.0  # ミッション開始からの総回転角（右回り正、左回り負）
+        self.previous_yaw = 0.0  # 前回のヨー角
+        # デバッグ用カウンター（定期的にyaw情報を出力するため）
+        self.yaw_debug_counter = 0
         self.last_autopilot_commands = None
         self.previous_aux_values = [0, 0, 0, 0]
         self.latest_attitude = {'roll': 0, 'pitch': 0, 'yaw': 0, 'alt': 0}
@@ -540,7 +543,12 @@ class TelemetryApp(QMainWindow):
         # --- Figure-8 Mission State ---
         self.figure8_phase = 0  # 0: 右旋回フェーズ, 1: 左旋回フェーズ
         self.figure8_completed = False
-        self.figure8_phase_start_yaw = 0  # 左旋回フェーズ開始時のyaw_diff値
+        self.figure8_phase_start_rotation = 0  # 左旋回フェーズ開始時の総回転角
+
+        # --- Ascending Turn Mission State ---
+        self.ascending_phase = 0  # 0: 2.5m左旋回2回, 1: 上昇中旋回, 2: 5m左旋回2回
+        self.ascending_completed = False
+        self.ascending_phase_start_rotation = 0  # フェーズ開始時の総回転角
 
         # --- Auto Landing State ---
         self.auto_landing_enabled = False
@@ -1520,9 +1528,9 @@ class TelemetryApp(QMainWindow):
 
         # ヨー軸は累積角度で表示（自動操縦時のみ）
         if self.autopilot_active:
-            # 自動操縦時は累積角度（mission_start_yaw + yaw_diff）で表示
-            cumulative_yaw = self.mission_start_yaw + self.yaw_diff
-            self.yaw_widget.set_angle(cumulative_yaw)
+            # 自動操縦時は開始角度 + 総回転角で表示
+            display_yaw = self.mission_start_yaw + self.mission_total_rotation
+            self.yaw_widget.set_angle(display_yaw)
         else:
             # 手動操縦時は受信した値をそのまま表示
             self.yaw_widget.set_angle(yaw)
@@ -1749,8 +1757,8 @@ class TelemetryApp(QMainWindow):
                 mission_found = True
                 prev_val = self.previous_aux_values[aux_index]
                 if prev_val < 1100: # And it was previously OFF (rising edge)
-                    # AUX2,3,4スイッチが入った瞬間にyaw_diffをリセット
-                    self.yaw_diff = 0
+                    # 新ミッション開始時に回転角をリセット
+                    self.mission_total_rotation = 0.0
                     self.start_mission(mission_map[aux_number])
                 break # Only handle one mission at a time
 
@@ -1767,15 +1775,21 @@ class TelemetryApp(QMainWindow):
         self.active_mission_mode = mission_mode
         self.mission_start_yaw = self.latest_attitude.get('yaw', 0)
         self.mission_start_altitude = self.latest_attitude.get('alt', 0)
-        self.last_yaw = self.mission_start_yaw
-        self.yaw_diff = 0  # ミッション開始時からの累積回転角度（右回り正、左回り負）
+        # 新しいヨー角追跡システムの初期化
+        self.previous_yaw = self.mission_start_yaw
+        self.mission_total_rotation = 0.0
 
         print(f"ミッション開始: 開始ヨー角={self.mission_start_yaw:.1f}°, 開始高度={self.mission_start_altitude/1000.0:.2f}m")
 
         # 八の字旋回の状態をリセット
         self.figure8_phase = 0  # 右旋回から開始
         self.figure8_completed = False
-        self.figure8_phase_start_yaw = 0  # 左旋回フェーズ開始時のyaw_diff値
+        self.figure8_phase_start_rotation = 0.0  # 左旋回フェーズ開始時の総回転角
+
+        # 上昇旋回の状態をリセット
+        self.ascending_phase = 0  # 0: 2.5m左旋回2回, 1: 上昇中旋回, 2: 5m左旋回2回
+        self.ascending_completed = False
+        self.ascending_phase_start_rotation = 0.0  # フェーズ開始時の総回転角
 
         self.roll_pid.reset()
         self.pitch_pid.reset()
@@ -1813,18 +1827,29 @@ class TelemetryApp(QMainWindow):
         current_yaw = self.latest_attitude.get('yaw', 0)
         dt = 0.05 # 50ms interval
 
-        # ヨー角の差分計算（0-359度システム、右回りが正）
-        delta_yaw = current_yaw - self.last_yaw
+        # 新しいヨー角追跡システム
+        current_yaw = self.latest_attitude.get('yaw', 0)
 
-        # 359度-0度境界を跨ぐ場合の処理
-        if delta_yaw > 180:
-            delta_yaw -= 360  # 例: 350° → 10°へ移動時: 10-350=-340° → -340+360=20°（左回り）
-        elif delta_yaw < -180:
-            delta_yaw += 360  # 例: 10° → 350°へ移動時: 350-10=340° → 340-360=-20°（右回り）
+        # ヨー角の変化量を計算（0-359度システム対応）
+        yaw_change = current_yaw - self.previous_yaw
 
-        # 累積ヨー差分に加算（右回りが正、左回りが負）
-        self.yaw_diff += delta_yaw
-        self.last_yaw = current_yaw
+        # 360度境界を跨ぐ場合の補正（最短角度で計算）
+        # 大きな値の飛びは実際の回転ではなく境界クロッシングとして処理
+        if yaw_change > 180:
+            yaw_change -= 360  # 例: 350° → 10°の変化 = 20°（右回り）を -340° → 20°に補正
+        elif yaw_change < -180:
+            yaw_change += 360  # 例: 10° → 350°の変化 = 340°（左回り）を -20°に補正
+
+        # 総回転角に加算（右回り正、左回り負）
+        self.mission_total_rotation += yaw_change
+        self.previous_yaw = current_yaw
+
+        # デバッグ出力（自動操縦時のみ、1秒間隔で出力）
+        if self.autopilot_active:
+            self.yaw_debug_counter += 1
+            if self.yaw_debug_counter >= 20:  # 50ms * 20 = 1秒間隔
+                print(f"YAW DEBUG: current={current_yaw:.1f}°, change={yaw_change:.1f}°, total_rotation={self.mission_total_rotation:.1f}°, start={self.mission_start_yaw:.1f}°")
+                self.yaw_debug_counter = 0
 
         target_roll = 0
         target_pitch = 0
@@ -1841,32 +1866,66 @@ class TelemetryApp(QMainWindow):
             # 水平旋回：ミッション開始時の高度を維持
             target_altitude = self.mission_start_altitude
             horizontal_target = self.current_autopilot_params.get('horizontal_turn_target', 760)
-            # 右旋回なので、開始時からの累積回転角yaw_diffが目標角度以上になったら成功
-            if self.yaw_diff >= horizontal_target:
-                current_actual_yaw = current_yaw  # 現在の実際のヨー角（0-359度）
-                print(f"水平旋回成功: 開始角={self.mission_start_yaw:.1f}°, 現在角={current_actual_yaw:.1f}°, 累積回転={self.yaw_diff:.1f}°")
+
+            # 水平旋回のデバッグ出力（5秒間隔）
+            if self.yaw_debug_counter % 100 == 0:  # 50ms * 100 = 5秒間隔
+                current_alt_m = current_alt / 1000.0
+                print(f"水平旋回: 高度={current_alt_m:.2f}m, 総回転={self.mission_total_rotation:.1f}°, 目標={horizontal_target}°")
+
+            # 右旋回なので、総回転角が目標角度以上になったら成功
+            if self.mission_total_rotation >= horizontal_target:
+                print(f"水平旋回成功: 開始角={self.mission_start_yaw:.1f}°, 現在角={current_yaw:.1f}°, 総回転角={self.mission_total_rotation:.1f}°")
                 self.mission_status_label.setText("ミッション: 水平旋回 成功")
-        elif self.active_mission_mode == 2: # Ascending Turn (左旋回)
+        elif self.active_mission_mode == 2: # Ascending Turn (4段階フェーズ制御)
             # 上昇旋回時は負のバンク角（左旋回）
             target_roll = -self.current_autopilot_params.get('bank_angle', 20)
-            ascending_target = self.current_autopilot_params.get('ascending_turn_target1', -760)
-
-            # 上昇旋回：上昇中かどうかで目標高度を切り替え
-            target_altitude_high = self.current_autopilot_params.get('altitude_high', 5.0)
             current_alt_m = current_alt / 1000.0  # mm -> m
 
-            # 上昇中（目標高度に達していない場合）は上昇後高度を目標とする
-            if current_alt_m < target_altitude_high:
-                target_altitude = target_altitude_high  # 上昇目標高度
-            else:
-                # 上昇完了後はミッション開始時の高度を基準とする
-                target_altitude = self.mission_start_altitude
+            if not self.ascending_completed:
+                if self.ascending_phase == 0:  # フェーズ0: 2.5m高度で左旋回2回（-720度）
+                    target_altitude = 2.5  # 2.5m維持
+                    phase_rotation = self.mission_total_rotation - self.ascending_phase_start_rotation
 
-            # 左旋回なので、開始時からの累積回転角yaw_diffが目標角度以下（負の値）になったら成功
-            if self.yaw_diff <= ascending_target:
-                current_actual_yaw = current_yaw  # 現在の実際のヨー角（0-359度）
-                print(f"上昇旋回成功: 開始角={self.mission_start_yaw:.1f}°, 現在角={current_actual_yaw:.1f}°, 累積回転={self.yaw_diff:.1f}°")
-                self.mission_status_label.setText("ミッション: 上昇旋回 成功")
+                    # フェーズ0のデバッグ出力（5秒間隔）
+                    if self.yaw_debug_counter % 100 == 0:  # 50ms * 100 = 5秒間隔
+                        print(f"上昇旋回フェーズ0: 高度={current_alt_m:.2f}m, フェーズ回転={phase_rotation:.1f}°, 目標=-720°")
+
+                    if phase_rotation <= -720:  # 2回転完了
+                        self.ascending_phase = 1  # 上昇中旋回フェーズに移行
+                        self.ascending_phase_start_rotation = self.mission_total_rotation
+                        print(f"上昇旋回: 2.5m水平旋回完了→上昇中旋回開始 (総回転角={self.mission_total_rotation:.1f}°)")
+
+                elif self.ascending_phase == 1:  # フェーズ1: 旋回しながら5mまで上昇
+                    # フェーズ1のデバッグ出力（5秒間隔）
+                    if self.yaw_debug_counter % 100 == 0:  # 50ms * 100 = 5秒間隔
+                        print(f"上昇旋回フェーズ1: 高度={current_alt_m:.2f}m, 総回転={self.mission_total_rotation:.1f}°, 目標高度=5.0m")
+
+                    # 高度に応じて目標を調整（2.5m→5m）
+                    if current_alt_m < 5.0:
+                        target_altitude = 5.0  # 上昇目標
+                    else:
+                        # 5m到達で次フェーズに移行
+                        self.ascending_phase = 2
+                        self.ascending_phase_start_rotation = self.mission_total_rotation
+                        print(f"上昇旋回: 5m到達→5m水平旋回開始 (総回転角={self.mission_total_rotation:.1f}°)")
+                        target_altitude = 5.0
+
+                elif self.ascending_phase == 2:  # フェーズ2: 5m高度で左旋回2回（-720度）
+                    target_altitude = 5.0  # 5m維持
+                    phase_rotation = self.mission_total_rotation - self.ascending_phase_start_rotation
+
+                    # フェーズ2のデバッグ出力（5秒間隔）
+                    if self.yaw_debug_counter % 100 == 0:  # 50ms * 100 = 5秒間隔
+                        print(f"上昇旋回フェーズ2: 高度={current_alt_m:.2f}m, フェーズ回転={phase_rotation:.1f}°, 目標=-720°")
+
+                    if phase_rotation <= -720:  # 2回転完了
+                        self.ascending_completed = True
+                        print(f"上昇旋回完了: 開始角={self.mission_start_yaw:.1f}°, 現在角={current_yaw:.1f}°, 総回転角={self.mission_total_rotation:.1f}°")
+                        self.mission_status_label.setText("ミッション: 上昇旋回 成功")
+            else:
+                # ミッション完了後は5m高度維持
+                target_altitude = 5.0
+                target_roll = 0
         elif self.active_mission_mode == 3: # Figure-8 Turn (右旋回→左旋回)
             # 八の字旋回：右旋回から入り、目標角到達で左バンクに切り替え
             self.alt_pid.setpoint = self.mission_start_altitude
@@ -1880,22 +1939,30 @@ class TelemetryApp(QMainWindow):
             if not self.figure8_completed:
                 if self.figure8_phase == 0:  # 右旋回フェーズ
                     target_roll = bank_angle  # 正のバンク角（右バンク）
-                    # 右旋回なので、開始時からの累積回転角yaw_diffが目標角度以上になったら次フェーズ
-                    if self.yaw_diff >= right_target:  # 右旋回目標角に到達
+
+                    # 八の字旋回 右フェーズのデバッグ出力（5秒間隔）
+                    if self.yaw_debug_counter % 100 == 0:
+                        print(f"八の字旋回右フェーズ: 総回転={self.mission_total_rotation:.1f}°, 目標={right_target}°")
+
+                    # 右旋回なので、総回転角が目標角度以上になったら次フェーズ
+                    if self.mission_total_rotation >= right_target:  # 右旋回目標角に到達
                         self.figure8_phase = 1  # 左旋回フェーズに切り替え
-                        self.figure8_phase_start_yaw = self.yaw_diff  # 左旋回開始時点のyaw_diffを記録
-                        current_actual_yaw = current_yaw
-                        print(f"八の字旋回: 右旋回完了→左旋回開始 (開始角={self.mission_start_yaw:.1f}°, 現在角={current_actual_yaw:.1f}°, 累積回転={self.yaw_diff:.1f}°)")
+                        self.figure8_phase_start_rotation = self.mission_total_rotation  # 左旋回開始時点の総回転角を記録
+                        print(f"八の字旋回: 右旋回完了→左旋回開始 (開始角={self.mission_start_yaw:.1f}°, 現在角={current_yaw:.1f}°, 総回転角={self.mission_total_rotation:.1f}°)")
 
                 elif self.figure8_phase == 1:  # 左旋回フェーズ
                     target_roll = -bank_angle  # 負のバンク角（左バンク）
                     # 左旋回の進行度を計算：右旋回完了時点からの相対角度（負の値）
-                    left_turn_progress = self.yaw_diff - self.figure8_phase_start_yaw
+                    left_turn_progress = self.mission_total_rotation - self.figure8_phase_start_rotation
+
+                    # 八の字旋回 左フェーズのデバッグ出力（5秒間隔）
+                    if self.yaw_debug_counter % 100 == 0:
+                        print(f"八の字旋回左フェーズ: 総回転={self.mission_total_rotation:.1f}°, 左進行={left_turn_progress:.1f}°, 目標=-{left_target}°")
+
                     # 左旋回でleft_target度以上回転したら完了（left_turn_progressが-left_target以下）
                     if left_turn_progress <= -left_target:  # 左旋回目標角に到達
                         self.figure8_completed = True
-                        current_actual_yaw = current_yaw
-                        print(f"八の字旋回完了: 開始角={self.mission_start_yaw:.1f}°, 現在角={current_actual_yaw:.1f}°, 総累積={self.yaw_diff:.1f}°, 左旋回進行={left_turn_progress:.1f}°")
+                        print(f"八の字旋回完了: 開始角={self.mission_start_yaw:.1f}°, 現在角={current_yaw:.1f}°, 総回転角={self.mission_total_rotation:.1f}°, 左旋回進行={left_turn_progress:.1f}°")
                         self.mission_status_label.setText("ミッション: 八の字旋回 成功")
             else:
                 # ミッション完了後は水平飛行
@@ -1907,19 +1974,32 @@ class TelemetryApp(QMainWindow):
         # 高度誤差に基づくスロットル制御
         current_alt_m = current_alt / 1000.0  # 高度をmm -> m単位に変換
 
-        if self.active_mission_mode == 2:  # 上昇旋回の特別処理
-            target_altitude_high = self.current_autopilot_params.get('altitude_high', 5.0)
-            # 上昇中は目標高度との差分でスロットル制御
-            if current_alt_m < target_altitude_high:
-                altitude_error_m = target_altitude_high - current_alt_m
+        if self.active_mission_mode == 2:  # 上昇旋回の新しい4段階制御
+            # target_altitudeは上記のフェーズ制御で設定済み
+            if self.ascending_phase == 0:  # フェーズ0: 2.5m維持
+                if abs(current_alt_m - 2.5) < 0.1:  # 2.5m付近では一定スロットル
+                    target_throttle = base_throttle
+                else:
+                    altitude_error_m = 2.5 - current_alt_m
+                    throttle_adjustment = altitude_error_m * altitude_gain
+                    target_throttle = base_throttle + throttle_adjustment
+                    target_throttle = max(throttle_min, min(target_throttle, throttle_max))
+                    target_throttle = int(target_throttle)
+            elif self.ascending_phase == 1:  # フェーズ1: 上昇中
+                altitude_error_m = 5.0 - current_alt_m
                 throttle_adjustment = altitude_error_m * altitude_gain
                 target_throttle = base_throttle + throttle_adjustment
-                # スロットル値を制限
                 target_throttle = max(throttle_min, min(target_throttle, throttle_max))
                 target_throttle = int(target_throttle)
-            else:
-                # 上昇完了後（水平旋回時）は水平旋回と同じスロットル制御
-                target_throttle = base_throttle
+            else:  # フェーズ2: 5m維持, またはミッション完了
+                if abs(current_alt_m - 5.0) < 0.1:  # 5m付近では一定スロットル
+                    target_throttle = base_throttle
+                else:
+                    altitude_error_m = 5.0 - current_alt_m
+                    throttle_adjustment = altitude_error_m * altitude_gain
+                    target_throttle = base_throttle + throttle_adjustment
+                    target_throttle = max(throttle_min, min(target_throttle, throttle_max))
+                    target_throttle = int(target_throttle)
         elif self.active_mission_mode == 3:  # 八の字旋回
             # 八の字旋回は水平旋回と同じスロットル制御
             target_throttle = base_throttle
@@ -1972,9 +2052,14 @@ class TelemetryApp(QMainWindow):
         if self.active_mission_mode == 1:  # 水平旋回
             horizontal_target = self.current_autopilot_params.get('horizontal_turn_target', 760)
             target_yaw_display = self.mission_start_yaw + horizontal_target
-        elif self.active_mission_mode == 2:  # 上昇旋回
-            ascending_target = self.current_autopilot_params.get('ascending_turn_target1', -760)
-            target_yaw_display = self.mission_start_yaw + ascending_target
+        elif self.active_mission_mode == 2:  # 上昇旋回（新しい4段階制御）
+            # 各フェーズの目標角度を表示
+            if self.ascending_phase == 0:  # フェーズ0: -720度目標
+                target_yaw_display = self.mission_start_yaw + self.ascending_phase_start_rotation - 720
+            elif self.ascending_phase == 1:  # フェーズ1: 上昇中（現在の回転角）
+                target_yaw_display = self.mission_start_yaw + self.mission_total_rotation
+            else:  # フェーズ2: さらに-720度目標
+                target_yaw_display = self.mission_start_yaw + self.ascending_phase_start_rotation - 720
         elif self.active_mission_mode == 3:  # 八の字旋回
             if self.figure8_phase == 0:  # 右旋回フェーズ
                 figure8_target = self.current_autopilot_params.get('figure8_right_target', 300)
@@ -1983,8 +2068,8 @@ class TelemetryApp(QMainWindow):
                 figure8_target = self.current_autopilot_params.get('figure8_left_target', -320)
                 target_yaw_display = self.mission_start_yaw + figure8_target
         else:
-            # 手動操縦時は現在の累積角度
-            target_yaw_display = self.mission_start_yaw + self.yaw_diff
+            # 手動操縦時は現在の総回転角
+            target_yaw_display = self.mission_start_yaw + self.mission_total_rotation
 
         self.yaw_widget.set_target_angle(target_yaw_display)
 
