@@ -349,12 +349,16 @@ class PositionVisualizationWidget(QWidget):
         self.setMinimumSize(400, 300)
         self.view_type = view_type  # "XY" or "ZY"
         self.aircraft_pos = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+        # Default marker positions (can be modified)
         self.aruco_markers = {
             1: {'x': -3.0, 'y': 6.0, 'z': 0.0, 'detected': False},
             2: {'x': 0.0, 'y': 0.0, 'z': 0.0, 'detected': False},
             3: {'x': 3.0, 'y': 6.0, 'z': 0.0, 'detected': False}
         }
         self.scale = 10.0  # pixels per meter
+
+        # Load marker positions from file if exists
+        self.load_marker_positions()
 
     def set_aircraft_position(self, x, y, z):
         self.aircraft_pos = {'x': x, 'y': y, 'z': z}
@@ -373,6 +377,64 @@ class PositionVisualizationWidget(QWidget):
             self.aruco_markers[marker_id]['y'] = y
             self.aruco_markers[marker_id]['detected'] = size > 0
         self.update()
+
+    def set_marker_position(self, marker_id, x, y, z=0.0):
+        """Set marker position (for field setup)"""
+        if marker_id in self.aruco_markers:
+            self.aruco_markers[marker_id]['x'] = x
+            self.aruco_markers[marker_id]['y'] = y
+            self.aruco_markers[marker_id]['z'] = z
+        self.update()
+
+    def get_marker_positions(self):
+        """Get all marker positions"""
+        positions = {}
+        for marker_id, marker in self.aruco_markers.items():
+            positions[marker_id] = {
+                'x': marker['x'],
+                'y': marker['y'],
+                'z': marker['z']
+            }
+        return positions
+
+    def load_marker_positions(self):
+        """Load marker positions from file"""
+        try:
+            if os.path.exists('marker_positions.txt'):
+                with open('marker_positions.txt', 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if '=' in line:
+                            key, value = line.split('=', 1)
+                            try:
+                                # Parse marker_X_Y=value format
+                                parts = key.split('_')
+                                if len(parts) == 3 and parts[0] == 'marker':
+                                    marker_id = int(parts[1])
+                                    coord = parts[2]  # x, y, or z
+                                    if marker_id in self.aruco_markers and coord in ['x', 'y', 'z']:
+                                        self.aruco_markers[marker_id][coord] = float(value)
+                            except (ValueError, IndexError):
+                                continue
+                print("マーカー位置を読み込みました")
+        except Exception as e:
+            print(f"マーカー位置読み込みエラー: {e}")
+
+    def save_marker_positions(self):
+        """Save marker positions to file"""
+        try:
+            with open('marker_positions.txt', 'w') as f:
+                f.write("# ArUco Marker Positions (Field Layout)\n")
+                f.write("# Format: marker_ID_coordinate=value\n\n")
+                for marker_id, marker in self.aruco_markers.items():
+                    f.write(f"marker_{marker_id}_x={marker['x']}\n")
+                    f.write(f"marker_{marker_id}_y={marker['y']}\n")
+                    f.write(f"marker_{marker_id}_z={marker['z']}\n")
+            print("マーカー位置を保存しました")
+            return True
+        except Exception as e:
+            print(f"マーカー位置保存エラー: {e}")
+            return False
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -413,29 +475,40 @@ class PositionVisualizationWidget(QWidget):
             painter.drawLine(center_x - 10, runway_end_y, center_x + 10, runway_end_y)
             painter.drawLine(center_x, runway_start_y, center_x, runway_end_y)
 
-        # Draw ArUco markers
+        # Draw ArUco markers (both configured positions and real-time detections)
         for marker_id, marker in self.aruco_markers.items():
-            # Skip if marker not detected
-            if marker.get('size', 0) <= 0:
-                continue
-
             if self.view_type == "XY":
-                marker_x = center_x + float(marker['x']) * self.scale / 100  # Convert to meters scale
-                marker_y = center_y - float(marker['y']) * self.scale / 100
+                # Use configured field positions for markers
+                marker_x = center_x + float(marker['x']) * self.scale
+                marker_y = center_y - float(marker['y']) * self.scale
             else:  # ZY view
-                marker_x = center_x + float(marker['y']) * self.scale / 100  # Y becomes horizontal
-                marker_y = center_y - float(marker.get('z', 0)) * self.scale  # Z becomes vertical
+                marker_x = center_x + float(marker['y']) * self.scale
+                marker_y = center_y - float(marker.get('z', 0)) * self.scale
 
-            # Color based on detection
-            color = QColor("lime") if marker.get('detected', False) or marker.get('size', 0) > 0 else QColor("red")
+            # Color based on detection status
+            is_detected = marker.get('detected', False) or marker.get('size', 0) > 0
+            color = QColor("lime") if is_detected else QColor("orange")
+
             painter.setPen(QPen(color, 2))
-            painter.setBrush(color)
-            painter.drawEllipse(QPointF(marker_x, marker_y), 8, 8)
+            painter.setBrush(QBrush(color))
 
-            # Draw marker ID and size
+            # Draw marker as square (more representative of ArUco markers)
+            marker_size = 12
+            marker_rect = QRectF(marker_x - marker_size/2, marker_y - marker_size/2, marker_size, marker_size)
+            painter.drawRect(marker_rect)
+
+            # Draw marker ID and position info
             painter.setPen(QPen(QColor("white"), 1))
-            marker_text = f"ID{marker_id}\nSize: {marker.get('size', 0):.0f}"
-            painter.drawText(marker_x + 12, marker_y - 5, marker_text)
+            if self.view_type == "XY":
+                marker_info = f"ID{marker_id}\n({marker['x']:.1f}, {marker['y']:.1f})"
+                if is_detected:
+                    marker_info += f"\nSize: {marker.get('size', 0):.0f}"
+            else:
+                marker_info = f"ID{marker_id}\n({marker['y']:.1f}, {marker.get('z', 0):.1f})"
+                if is_detected:
+                    marker_info += f"\nSize: {marker.get('size', 0):.0f}"
+
+            painter.drawText(marker_x + marker_size/2 + 5, marker_y - marker_size/2, marker_info)
 
         # Draw aircraft position
         if self.view_type == "XY":
@@ -906,6 +979,87 @@ class TelemetryApp(QMainWindow):
         panel = QWidget()
         layout = QVBoxLayout(panel)
 
+        # Marker Position Configuration
+        position_group = QGroupBox("マーカー位置設定 (フィールドレイアウト)")
+        position_layout = QVBoxLayout(position_group)
+
+        # Position input controls
+        self.marker_position_controls = {}
+        for marker_id in [1, 2, 3]:
+            marker_widget = QWidget()
+            marker_layout = QFormLayout(marker_widget)
+
+            # Get current positions from position widget or use defaults
+            default_positions = {1: {'x': -3.0, 'y': 6.0, 'z': 0.0},
+                               2: {'x': 0.0, 'y': 0.0, 'z': 0.0},
+                               3: {'x': 3.0, 'y': 6.0, 'z': 0.0}}
+            default_pos = default_positions[marker_id]
+
+            x_input = QLineEdit(f"{default_pos['x']:.1f}")
+            y_input = QLineEdit(f"{default_pos['y']:.1f}")
+            z_input = QLineEdit(f"{default_pos.get('z', 0.0):.1f}")
+
+            marker_layout.addRow(f"マーカー {marker_id} X (m):", x_input)
+            marker_layout.addRow(f"マーカー {marker_id} Y (m):", y_input)
+            marker_layout.addRow(f"マーカー {marker_id} Z (m):", z_input)
+
+            # Store references
+            self.marker_position_controls[marker_id] = {
+                'x': x_input,
+                'y': y_input,
+                'z': z_input
+            }
+
+            # Connect real-time update
+            x_input.textChanged.connect(lambda text, mid=marker_id: self.update_marker_position_realtime(mid))
+            y_input.textChanged.connect(lambda text, mid=marker_id: self.update_marker_position_realtime(mid))
+            z_input.textChanged.connect(lambda text, mid=marker_id: self.update_marker_position_realtime(mid))
+
+            position_layout.addWidget(marker_widget)
+
+        # Position control buttons
+        button_widget = QWidget()
+        button_layout = QHBoxLayout(button_widget)
+
+        save_positions_button = QPushButton("位置保存")
+        save_positions_button.clicked.connect(self.save_marker_positions)
+        load_positions_button = QPushButton("位置読み込み")
+        load_positions_button.clicked.connect(self.load_marker_positions_ui)
+        reset_positions_button = QPushButton("デフォルト位置")
+        reset_positions_button.clicked.connect(self.reset_marker_positions)
+
+        button_layout.addWidget(save_positions_button)
+        button_layout.addWidget(load_positions_button)
+        button_layout.addWidget(reset_positions_button)
+
+        position_layout.addWidget(button_widget)
+        layout.addWidget(position_group)
+
+        layout.addStretch()
+
+        return panel
+
+    def _create_calibration_graph_tab(self):
+        """Create calibration graph tab for visualizing distance calibration data and individual marker calibration"""
+        calib_widget = QWidget()
+        main_layout = QHBoxLayout(calib_widget)
+
+        # Left Panel: Individual Marker Calibration
+        left_panel = self._create_calibration_left_panel()
+        main_layout.addWidget(left_panel, 1)
+
+        # Right Panel: Graph display and data management
+        right_panel = self._create_calibration_right_panel()
+        main_layout.addWidget(right_panel, 2)
+
+        # Add calibration graph tab to tab widget
+        self.tab_widget.addTab(calib_widget, "キャリブレーション")
+
+    def _create_calibration_left_panel(self):
+        """Create left panel for calibration tab - Individual marker calibration"""
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+
         # ArUco Marker Individual Calibration
         marker_calib_group = QGroupBox("ArUcoマーカー個別キャリブレーション")
         marker_calib_layout = QVBoxLayout(marker_calib_group)
@@ -966,15 +1120,14 @@ class TelemetryApp(QMainWindow):
             marker_calib_layout.addWidget(marker_widget)
 
         layout.addWidget(marker_calib_group)
-
         layout.addStretch()
 
         return panel
 
-    def _create_calibration_graph_tab(self):
-        """Create calibration graph tab for visualizing distance calibration data"""
-        calib_widget = QWidget()
-        main_layout = QVBoxLayout(calib_widget)
+    def _create_calibration_right_panel(self):
+        """Create right panel for calibration tab - Graph display and data management"""
+        panel = QWidget()
+        main_layout = QVBoxLayout(panel)
 
         # Title
         title_label = QLabel("距離キャリブレーション・グラフ表示")
@@ -1028,8 +1181,7 @@ class TelemetryApp(QMainWindow):
         data_layout.addWidget(self.calibration_data_display)
         main_layout.addWidget(data_group)
 
-        # Add calibration graph tab to tab widget
-        self.tab_widget.addTab(calib_widget, "キャリブレーション")
+        return panel
 
     def _setup_timers(self):
         # Telemetry processing timer
@@ -2758,6 +2910,94 @@ class TelemetryApp(QMainWindow):
             return conf['center_in'] + norm_val * (conf['max_in'] - conf['center_in'])
         else:
             return conf['center_in'] + norm_val * (conf['center_in'] - conf['min_in'])
+
+    def update_marker_position_realtime(self, marker_id):
+        """Update marker position in real-time as user types"""
+        try:
+            if marker_id not in self.marker_position_controls:
+                return
+
+            controls = self.marker_position_controls[marker_id]
+            x = float(controls['x'].text())
+            y = float(controls['y'].text())
+            z = float(controls['z'].text())
+
+            # Update position widgets
+            if hasattr(self, 'xy_position_widget'):
+                self.xy_position_widget.set_marker_position(marker_id, x, y, z)
+            if hasattr(self, 'zy_position_widget'):
+                self.zy_position_widget.set_marker_position(marker_id, x, y, z)
+
+        except (ValueError, KeyError):
+            # Ignore invalid input during typing
+            pass
+
+    def save_marker_positions(self):
+        """Save marker positions from UI inputs"""
+        try:
+            success = False
+            if hasattr(self, 'xy_position_widget'):
+                success = self.xy_position_widget.save_marker_positions()
+            if success:
+                self.status_label.setText("マーカー位置を保存しました")
+                print("マーカー位置保存完了")
+            else:
+                self.status_label.setText("マーカー位置保存に失敗しました")
+        except Exception as e:
+            print(f"マーカー位置保存エラー: {e}")
+            self.status_label.setText(f"保存エラー: {e}")
+
+    def load_marker_positions_ui(self):
+        """Load marker positions and update UI"""
+        try:
+            if hasattr(self, 'xy_position_widget'):
+                self.xy_position_widget.load_marker_positions()
+                if hasattr(self, 'zy_position_widget'):
+                    self.zy_position_widget.load_marker_positions()
+
+                # Update UI controls with loaded positions
+                for marker_id in [1, 2, 3]:
+                    if marker_id in self.marker_position_controls and marker_id in self.xy_position_widget.aruco_markers:
+                        marker_pos = self.xy_position_widget.aruco_markers[marker_id]
+                        controls = self.marker_position_controls[marker_id]
+                        controls['x'].setText(f"{marker_pos['x']:.1f}")
+                        controls['y'].setText(f"{marker_pos['y']:.1f}")
+                        controls['z'].setText(f"{marker_pos['z']:.1f}")
+
+                self.status_label.setText("マーカー位置を読み込みました")
+                print("マーカー位置読み込み完了")
+        except Exception as e:
+            print(f"マーカー位置読み込みエラー: {e}")
+            self.status_label.setText(f"読み込みエラー: {e}")
+
+    def reset_marker_positions(self):
+        """Reset marker positions to default values"""
+        default_positions = {
+            1: {'x': -3.0, 'y': 6.0, 'z': 0.0},
+            2: {'x': 0.0, 'y': 0.0, 'z': 0.0},
+            3: {'x': 3.0, 'y': 6.0, 'z': 0.0}
+        }
+
+        try:
+            # Update position widgets
+            for marker_id, pos in default_positions.items():
+                if hasattr(self, 'xy_position_widget'):
+                    self.xy_position_widget.set_marker_position(marker_id, pos['x'], pos['y'], pos['z'])
+                if hasattr(self, 'zy_position_widget'):
+                    self.zy_position_widget.set_marker_position(marker_id, pos['x'], pos['y'], pos['z'])
+
+                # Update UI controls
+                if marker_id in self.marker_position_controls:
+                    controls = self.marker_position_controls[marker_id]
+                    controls['x'].setText(f"{pos['x']:.1f}")
+                    controls['y'].setText(f"{pos['y']:.1f}")
+                    controls['z'].setText(f"{pos['z']:.1f}")
+
+            self.status_label.setText("マーカー位置をデフォルトにリセットしました")
+            print("マーカー位置リセット完了")
+        except Exception as e:
+            print(f"マーカー位置リセットエラー: {e}")
+            self.status_label.setText(f"リセットエラー: {e}")
 
     def closeEvent(self, event):
         if self.video_thread and self.video_thread.isRunning():
