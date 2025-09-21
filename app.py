@@ -473,6 +473,127 @@ class PositionVisualizationWidget(QWidget):
             painter.drawText(self.width() - 30, center_y - 10, "Y")
             painter.drawText(center_x + 10, 15, "Z")
 
+# --- Calibration Graph Widget ---
+class CalibrationGraphWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumSize(600, 400)
+        self.calibration_data = {}
+        self.selected_marker = "全マーカー"
+
+    def set_calibration_data(self, data):
+        """Set calibration data for display"""
+        self.calibration_data = data
+        self.update()
+
+    def set_selected_marker(self, marker_text):
+        """Set which marker to display"""
+        self.selected_marker = marker_text
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Background
+        painter.fillRect(self.rect(), QColor("#2b2b2b"))
+
+        # Draw graph
+        self._draw_graph(painter)
+
+    def _draw_graph(self, painter):
+        """Draw calibration graph"""
+        if not self.calibration_data:
+            # No data message
+            painter.setPen(QPen(QColor("white"), 1))
+            painter.drawText(self.rect().center() + QPointF(-100, 0), "キャリブレーションデータがありません")
+            return
+
+        # Graph area
+        margin = 50
+        graph_rect = QRectF(margin, margin, self.width() - 2 * margin, self.height() - 2 * margin)
+
+        # Draw axes
+        painter.setPen(QPen(QColor("white"), 2))
+        painter.drawLine(graph_rect.bottomLeft(), graph_rect.bottomRight())  # X axis
+        painter.drawLine(graph_rect.bottomLeft(), graph_rect.topLeft())      # Y axis
+
+        # Determine data range
+        all_distances = []
+        all_sizes = []
+
+        markers_to_show = []
+        if self.selected_marker == "全マーカー":
+            markers_to_show = [1, 2, 3]
+        else:
+            marker_num = int(self.selected_marker.split()[1])
+            markers_to_show = [marker_num]
+
+        for marker_id in markers_to_show:
+            if marker_id in self.calibration_data:
+                for point in self.calibration_data[marker_id]:
+                    if 'distance' in point and 'size' in point:
+                        all_distances.append(point['distance'])
+                        all_sizes.append(point['size'])
+
+        if not all_distances:
+            return
+
+        min_dist, max_dist = min(all_distances), max(all_distances)
+        min_size, max_size = min(all_sizes), max(all_sizes)
+
+        # Add some padding
+        dist_range = max_dist - min_dist if max_dist > min_dist else 1
+        size_range = max_size - min_size if max_size > min_size else 1
+
+        min_dist -= dist_range * 0.1
+        max_dist += dist_range * 0.1
+        min_size -= size_range * 0.1
+        max_size += size_range * 0.1
+
+        # Draw data points and lines for each marker
+        colors = [QColor("red"), QColor("green"), QColor("blue")]
+
+        for i, marker_id in enumerate(markers_to_show):
+            if marker_id not in self.calibration_data:
+                continue
+
+            color = colors[i % len(colors)]
+            painter.setPen(QPen(color, 2))
+            painter.setBrush(QBrush(color))
+
+            points = []
+            for point in self.calibration_data[marker_id]:
+                if 'distance' in point and 'size' in point:
+                    x = graph_rect.left() + (point['distance'] - min_dist) / (max_dist - min_dist) * graph_rect.width()
+                    y = graph_rect.bottom() - (point['size'] - min_size) / (max_size - min_size) * graph_rect.height()
+                    points.append(QPointF(x, y))
+
+                    # Draw point
+                    painter.drawEllipse(QPointF(x, y), 4, 4)
+
+            # Draw connecting lines
+            if len(points) > 1:
+                painter.setPen(QPen(color, 1, Qt.DashLine))
+                for i in range(len(points) - 1):
+                    painter.drawLine(points[i], points[i + 1])
+
+        # Draw labels
+        painter.setPen(QPen(QColor("white"), 1))
+        painter.drawText(graph_rect.bottomRight() + QPointF(-50, 20), "距離 (m)")
+        painter.drawText(graph_rect.topLeft() + QPointF(-40, -10), "サイズ (px)")
+
+        # Draw legend
+        legend_y = graph_rect.top() + 20
+        for i, marker_id in enumerate(markers_to_show):
+            if marker_id in self.calibration_data:
+                color = colors[i % len(colors)]
+                painter.setPen(QPen(color, 2))
+                painter.drawLine(graph_rect.right() - 120, legend_y + i * 20,
+                               graph_rect.right() - 100, legend_y + i * 20)
+                painter.setPen(QPen(QColor("white"), 1))
+                painter.drawText(graph_rect.right() - 95, legend_y + i * 20 + 5, f"マーカー {marker_id}")
+
 # --- Main Application Window ---
 class TelemetryApp(QMainWindow):
     GAINS_TO_TUNE = [
@@ -558,9 +679,9 @@ class TelemetryApp(QMainWindow):
 
         # --- ArUco Marker Calibration Data ---
         self.marker_calibrations = {
-            1: {'offset_x': 0.0, 'offset_y': 0.0, 'offset_angle': 0.0, 'enabled': False},
-            2: {'offset_x': 0.0, 'offset_y': 0.0, 'offset_angle': 0.0, 'enabled': False},
-            3: {'offset_x': 0.0, 'offset_y': 0.0, 'offset_angle': 0.0, 'enabled': False}
+            1: {'offset_x': 0.0, 'offset_y': 0.0, 'offset_angle': 0.0},
+            2: {'offset_x': 0.0, 'offset_y': 0.0, 'offset_angle': 0.0},
+            3: {'offset_x': 0.0, 'offset_y': 0.0, 'offset_angle': 0.0}
         }
 
         # --- Figure-8 Mission State ---
@@ -676,6 +797,9 @@ class TelemetryApp(QMainWindow):
 
         # Add Auto Landing tab to tab widget
         self.tab_widget.addTab(auto_landing_widget, "自動離着陸")
+
+        # Create calibration graph tab
+        self._create_calibration_graph_tab()
 
     def _create_auto_landing_left_panel(self):
         """Create left panel for auto landing tab - Control enable, inputs display and parameters"""
@@ -797,10 +921,6 @@ class TelemetryApp(QMainWindow):
             header_label.setStyleSheet("font-weight: bold; color: #FFD700;")
             marker_layout.addWidget(header_label)
 
-            # Enable checkbox
-            enable_checkbox = QCheckBox("キャリブレーション有効")
-            enable_checkbox.stateChanged.connect(lambda state, mid=marker_id: self.toggle_marker_calibration(mid, state))
-
             # Position offsets
             offset_x_input = QLineEdit("0.0")
             offset_y_input = QLineEdit("0.0")
@@ -813,51 +933,103 @@ class TelemetryApp(QMainWindow):
             # Calibration buttons
             set_current_button = QPushButton("現在値をキャリブレーション値に設定")
             set_current_button.clicked.connect(lambda checked, mid=marker_id: self.set_current_as_calibration(mid))
+            set_current_button.setEnabled(False)  # Initially disabled
+
+            # Distance calibration for this marker
+            distance_input = QLineEdit("5.0")
+            record_distance_button = QPushButton("距離キャリブレーション記録")
+            record_distance_button.clicked.connect(lambda checked, mid=marker_id: self.record_marker_distance_calibration(mid))
+            record_distance_button.setEnabled(False)  # Initially disabled
 
             marker_form = QFormLayout()
-            marker_form.addRow("有効:", enable_checkbox)
             marker_form.addRow("X オフセット (m):", offset_x_input)
             marker_form.addRow("Y オフセット (m):", offset_y_input)
             marker_form.addRow("角度 オフセット (度):", offset_angle_input)
             marker_form.addRow("リアルタイムデータ:", realtime_label)
             marker_form.addRow(set_current_button)
+            marker_form.addRow("基準距離 (m):", distance_input)
+            marker_form.addRow(record_distance_button)
 
             marker_layout.addLayout(marker_form)
 
             # Store references
             self.marker_calib_controls[marker_id] = {
-                'enable': enable_checkbox,
                 'offset_x': offset_x_input,
                 'offset_y': offset_y_input,
                 'offset_angle': offset_angle_input,
-                'realtime': realtime_label
+                'realtime': realtime_label,
+                'distance_input': distance_input,
+                'set_current_button': set_current_button,
+                'record_distance_button': record_distance_button
             }
 
             marker_calib_layout.addWidget(marker_widget)
 
         layout.addWidget(marker_calib_group)
 
-        # Calibration panel placeholder
-        calib_group = QGroupBox("距離推定キャリブレーション")
-        calib_layout = QFormLayout(calib_group)
-
-        # Calibration distance input
-        self.calib_distance_input = QLineEdit("5.0")
-        self.calib_record_button = QPushButton("現在のサイズを記録")
-        self.calib_record_button.clicked.connect(self.record_calibration_point)
-
-        calib_layout.addRow("基準距離 (m):", self.calib_distance_input)
-        calib_layout.addRow(self.calib_record_button)
-
-        # Show current calibration points
-        self.calib_display = QLabel("キャリブレーション点:\n(未設定)")
-        calib_layout.addRow(self.calib_display)
-
-        layout.addWidget(calib_group)
-
         layout.addStretch()
 
         return panel
+
+    def _create_calibration_graph_tab(self):
+        """Create calibration graph tab for visualizing distance calibration data"""
+        calib_widget = QWidget()
+        main_layout = QVBoxLayout(calib_widget)
+
+        # Title
+        title_label = QLabel("距離キャリブレーション・グラフ表示")
+        title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #FFD700;")
+        main_layout.addWidget(title_label)
+
+        # Control panel
+        control_panel = QWidget()
+        control_layout = QHBoxLayout(control_panel)
+
+        # Marker selection
+        marker_select_label = QLabel("表示マーカー:")
+        self.graph_marker_combo = QComboBox()
+        self.graph_marker_combo.addItems(["マーカー 1", "マーカー 2", "マーカー 3", "全マーカー"])
+        self.graph_marker_combo.setCurrentText("全マーカー")
+        self.graph_marker_combo.currentTextChanged.connect(self.update_calibration_graph)
+
+        # Refresh button
+        refresh_button = QPushButton("グラフ更新")
+        refresh_button.clicked.connect(self.update_calibration_graph)
+
+        # Save calibration data button
+        save_calib_button = QPushButton("キャリブレーションデータ保存")
+        save_calib_button.clicked.connect(self.export_calibration_data)
+
+        # Load calibration data button
+        load_calib_button = QPushButton("キャリブレーションデータ読み込み")
+        load_calib_button.clicked.connect(self.import_calibration_data)
+
+        control_layout.addWidget(marker_select_label)
+        control_layout.addWidget(self.graph_marker_combo)
+        control_layout.addWidget(refresh_button)
+        control_layout.addWidget(save_calib_button)
+        control_layout.addWidget(load_calib_button)
+        control_layout.addStretch()
+
+        main_layout.addWidget(control_panel)
+
+        # Graph display area
+        self.calibration_graph_widget = CalibrationGraphWidget()
+        main_layout.addWidget(self.calibration_graph_widget, 1)
+
+        # Data display area
+        data_group = QGroupBox("キャリブレーションデータ")
+        data_layout = QVBoxLayout(data_group)
+
+        self.calibration_data_display = QLabel("キャリブレーションデータなし")
+        self.calibration_data_display.setStyleSheet("font-family: monospace; color: #FFFFFF;")
+        self.calibration_data_display.setWordWrap(True)
+
+        data_layout.addWidget(self.calibration_data_display)
+        main_layout.addWidget(data_group)
+
+        # Add calibration graph tab to tab widget
+        self.tab_widget.addTab(calib_widget, "キャリブレーション")
 
     def _setup_timers(self):
         # Telemetry processing timer
@@ -1001,13 +1173,6 @@ class TelemetryApp(QMainWindow):
                 calib_text += f"{point_name}: {dist:.1f}m -> {size:.1f}px\n"
             self.calib_display.setText(calib_text)
 
-    def toggle_marker_calibration(self, marker_id, state):
-        """Toggle marker calibration enabled state"""
-        enabled = state == 2  # Qt.Checked = 2
-        self.marker_calibrations[marker_id]['enabled'] = enabled
-        print(f"Marker {marker_id} calibration {'enabled' if enabled else 'disabled'}")
-        self.save_marker_calibrations()
-
     def set_current_as_calibration(self, marker_id):
         """Set current marker data as calibration baseline"""
         if marker_id not in self.aruco_markers:
@@ -1038,10 +1203,22 @@ class TelemetryApp(QMainWindow):
         for marker_id in [1, 2, 3]:
             if marker_id in self.marker_calib_controls:
                 marker_data = self.aruco_markers.get(marker_id, {'size': 0, 'x': 0, 'y': 0})
-                realtime_text = f"リアルタイム: サイズ={marker_data['size']}, X={marker_data['x']}, Y={marker_data['y']}"
+
+                # Check if marker is visible
+                is_visible = marker_data['size'] > 0
+
+                # Enable/disable buttons based on visibility
+                self.marker_calib_controls[marker_id]['set_current_button'].setEnabled(is_visible)
+                self.marker_calib_controls[marker_id]['record_distance_button'].setEnabled(is_visible)
+
+                # Estimate distance if calibration data is available
+                estimated_distance = self.estimate_distance_from_marker(marker_id)
+                distance_text = f", 推定距離={estimated_distance:.2f}m" if estimated_distance is not None else ""
+
+                realtime_text = f"リアルタイム: サイズ={marker_data['size']}, X={marker_data['x']}, Y={marker_data['y']}{distance_text}"
 
                 # Color coding based on visibility
-                if marker_data['size'] > 0:
+                if is_visible:
                     self.marker_calib_controls[marker_id]['realtime'].setStyleSheet("color: #00FF00; font-size: 10px;")  # Green
                 else:
                     self.marker_calib_controls[marker_id]['realtime'].setStyleSheet("color: #FF0000; font-size: 10px;")  # Red
@@ -1079,7 +1256,6 @@ class TelemetryApp(QMainWindow):
             calib_file = 'marker_calibrations.txt'
             with open(calib_file, 'w') as f:
                 for marker_id, calib in self.marker_calibrations.items():
-                    f.write(f"marker_{marker_id}_enabled={calib['enabled']}\n")
                     f.write(f"marker_{marker_id}_offset_x={calib['offset_x']}\n")
                     f.write(f"marker_{marker_id}_offset_y={calib['offset_y']}\n")
                     f.write(f"marker_{marker_id}_offset_angle={calib['offset_angle']}\n")
@@ -1108,12 +1284,7 @@ class TelemetryApp(QMainWindow):
                                 param = '_'.join(parts[2:])
 
                                 if marker_id in self.marker_calibrations:
-                                    if param == 'enabled':
-                                        self.marker_calibrations[marker_id]['enabled'] = value.lower() == 'true'
-                                        # Update UI checkbox
-                                        if marker_id in self.marker_calib_controls:
-                                            self.marker_calib_controls[marker_id]['enable'].setChecked(value.lower() == 'true')
-                                    elif param in ['offset_x', 'offset_y', 'offset_angle']:
+                                    if param in ['offset_x', 'offset_y', 'offset_angle']:
                                         self.marker_calibrations[marker_id][param] = float(value)
                                         # Update UI input field
                                         if marker_id in self.marker_calib_controls:
@@ -1122,6 +1293,263 @@ class TelemetryApp(QMainWindow):
             print("Marker calibrations loaded")
         except Exception as e:
             print(f"Failed to load marker calibrations: {e}")
+
+    def record_marker_distance_calibration(self, marker_id):
+        """Record distance calibration for a specific marker"""
+        try:
+            if marker_id not in self.marker_calib_controls:
+                print(f"Marker {marker_id} controls not found")
+                return
+
+            # Get distance from input field
+            distance_input = self.marker_calib_controls[marker_id]['distance_input']
+            distance = float(distance_input.text())
+
+            if distance <= 0:
+                print(f"Invalid distance for marker {marker_id} calibration")
+                return
+
+            # Check if marker is visible
+            if marker_id not in self.aruco_markers or self.aruco_markers[marker_id]['size'] <= 0:
+                print(f"Marker {marker_id} not currently visible")
+                return
+
+            marker_size = self.aruco_markers[marker_id]['size']
+
+            # Store calibration data for this specific marker
+            if not hasattr(self, 'marker_distance_calibrations'):
+                self.marker_distance_calibrations = {}
+
+            if marker_id not in self.marker_distance_calibrations:
+                self.marker_distance_calibrations[marker_id] = []
+
+            # Add new calibration point
+            calibration_point = {
+                'distance': distance,
+                'size': marker_size,
+                'x': self.aruco_markers[marker_id]['x'],
+                'y': self.aruco_markers[marker_id]['y']
+            }
+
+            self.marker_distance_calibrations[marker_id].append(calibration_point)
+
+            # Keep only the last 3 calibration points per marker
+            if len(self.marker_distance_calibrations[marker_id]) > 3:
+                self.marker_distance_calibrations[marker_id] = self.marker_distance_calibrations[marker_id][-3:]
+
+            # Save to file
+            self.save_marker_distance_calibrations()
+
+            # Update calibration graph if it exists
+            if hasattr(self, 'calibration_graph_widget'):
+                self.update_calibration_graph()
+
+            print(f"Recorded distance calibration for marker {marker_id}: {distance}m -> {marker_size} pixels")
+
+        except ValueError:
+            print(f"Invalid distance value for marker {marker_id} calibration")
+        except Exception as e:
+            print(f"Error recording marker {marker_id} distance calibration: {e}")
+
+    def save_marker_distance_calibrations(self):
+        """Save marker distance calibrations to file"""
+        try:
+            calib_file = 'marker_distance_calibrations.txt'
+            if not hasattr(self, 'marker_distance_calibrations'):
+                return
+
+            with open(calib_file, 'w') as f:
+                for marker_id, calibrations in self.marker_distance_calibrations.items():
+                    for i, calib in enumerate(calibrations):
+                        f.write(f"marker_{marker_id}_point_{i}_distance={calib['distance']}\n")
+                        f.write(f"marker_{marker_id}_point_{i}_size={calib['size']}\n")
+                        f.write(f"marker_{marker_id}_point_{i}_x={calib['x']}\n")
+                        f.write(f"marker_{marker_id}_point_{i}_y={calib['y']}\n")
+
+            print("Marker distance calibrations saved")
+        except Exception as e:
+            print(f"Failed to save marker distance calibrations: {e}")
+
+    def load_marker_distance_calibrations(self):
+        """Load marker distance calibrations from file"""
+        try:
+            calib_file = 'marker_distance_calibrations.txt'
+            if not os.path.exists(calib_file):
+                return
+
+            self.marker_distance_calibrations = {}
+
+            with open(calib_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+
+                        if key.startswith('marker_') and '_point_' in key:
+                            parts = key.split('_')
+                            if len(parts) >= 5:
+                                marker_id = int(parts[1])
+                                point_idx = int(parts[3])
+                                param = parts[4]
+
+                                if marker_id not in self.marker_distance_calibrations:
+                                    self.marker_distance_calibrations[marker_id] = []
+
+                                # Ensure we have enough calibration points
+                                while len(self.marker_distance_calibrations[marker_id]) <= point_idx:
+                                    self.marker_distance_calibrations[marker_id].append({})
+
+                                self.marker_distance_calibrations[marker_id][point_idx][param] = float(value)
+
+            print("Marker distance calibrations loaded")
+        except Exception as e:
+            print(f"Failed to load marker distance calibrations: {e}")
+
+    def estimate_distance_from_marker(self, marker_id):
+        """Estimate distance to marker based on its size and calibration data"""
+        if not hasattr(self, 'marker_distance_calibrations'):
+            return None
+
+        if marker_id not in self.marker_distance_calibrations:
+            return None
+
+        if marker_id not in self.aruco_markers or self.aruco_markers[marker_id]['size'] <= 0:
+            return None
+
+        current_size = self.aruco_markers[marker_id]['size']
+        calibrations = self.marker_distance_calibrations[marker_id]
+
+        if len(calibrations) == 0:
+            return None
+
+        # Use linear interpolation or the closest calibration point
+        if len(calibrations) == 1:
+            # Single point: use simple inverse relationship
+            calib = calibrations[0]
+            estimated_distance = calib['distance'] * calib['size'] / current_size
+            return estimated_distance
+        else:
+            # Multiple points: find the two closest by size
+            calibrations = sorted(calibrations, key=lambda x: x['size'])
+
+            # Find the best interpolation range
+            if current_size <= calibrations[0]['size']:
+                # Extrapolate using first two points
+                p1, p2 = calibrations[0], calibrations[1] if len(calibrations) > 1 else calibrations[0]
+            elif current_size >= calibrations[-1]['size']:
+                # Extrapolate using last two points
+                p1, p2 = calibrations[-2] if len(calibrations) > 1 else calibrations[-1], calibrations[-1]
+            else:
+                # Interpolate between closest points
+                p1 = calibrations[0]
+                p2 = calibrations[-1]
+                for i in range(len(calibrations) - 1):
+                    if calibrations[i]['size'] <= current_size <= calibrations[i + 1]['size']:
+                        p1, p2 = calibrations[i], calibrations[i + 1]
+                        break
+
+            # Linear interpolation
+            if p1['size'] == p2['size']:
+                return p1['distance']
+
+            # Interpolate distance based on size ratio
+            size_ratio = (current_size - p1['size']) / (p2['size'] - p1['size'])
+            estimated_distance = p1['distance'] + size_ratio * (p2['distance'] - p1['distance'])
+
+            return estimated_distance
+
+    def update_calibration_graph(self):
+        """Update calibration graph display"""
+        if hasattr(self, 'calibration_graph_widget'):
+            # Get selected marker
+            selected_text = self.graph_marker_combo.currentText()
+            self.calibration_graph_widget.set_selected_marker(selected_text)
+
+            # Pass calibration data
+            if hasattr(self, 'marker_distance_calibrations'):
+                self.calibration_graph_widget.set_calibration_data(self.marker_distance_calibrations)
+
+            # Update text display
+            self.update_calibration_data_display()
+
+    def update_calibration_data_display(self):
+        """Update calibration data text display"""
+        if not hasattr(self, 'calibration_data_display'):
+            return
+
+        if not hasattr(self, 'marker_distance_calibrations') or not self.marker_distance_calibrations:
+            self.calibration_data_display.setText("キャリブレーションデータなし")
+            return
+
+        display_text = "キャリブレーションデータ:\n\n"
+
+        for marker_id in [1, 2, 3]:
+            if marker_id in self.marker_distance_calibrations:
+                display_text += f"マーカー {marker_id}:\n"
+                for i, point in enumerate(self.marker_distance_calibrations[marker_id]):
+                    if 'distance' in point and 'size' in point:
+                        display_text += f"  ポイント{i+1}: 距離={point['distance']:.2f}m, サイズ={point['size']:.1f}px\n"
+                display_text += "\n"
+
+        self.calibration_data_display.setText(display_text)
+
+    def export_calibration_data(self):
+        """Export calibration data to JSON file"""
+        try:
+            import json
+            from datetime import datetime
+
+            if not hasattr(self, 'marker_distance_calibrations'):
+                print("No calibration data to export")
+                return
+
+            # Prepare data for export
+            export_data = {
+                'export_time': datetime.now().isoformat(),
+                'markers': self.marker_distance_calibrations
+            }
+
+            # Save to file with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f'calibration_export_{timestamp}.json'
+
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(export_data, f, indent=2, ensure_ascii=False)
+
+            print(f"Calibration data exported to {filename}")
+
+        except Exception as e:
+            print(f"Failed to export calibration data: {e}")
+
+    def import_calibration_data(self):
+        """Import calibration data from JSON file"""
+        try:
+            import json
+            import glob
+
+            # Find the most recent export file
+            export_files = glob.glob('calibration_export_*.json')
+            if not export_files:
+                print("No calibration export files found")
+                return
+
+            # Use the most recent file
+            latest_file = max(export_files)
+
+            with open(latest_file, 'r', encoding='utf-8') as f:
+                import_data = json.load(f)
+
+            # Load the data
+            if 'markers' in import_data:
+                self.marker_distance_calibrations = import_data['markers']
+                self.save_marker_distance_calibrations()  # Save to regular format too
+                self.update_calibration_graph()
+                print(f"Calibration data imported from {latest_file}")
+            else:
+                print("Invalid calibration data format")
+
+        except Exception as e:
+            print(f"Failed to import calibration data: {e}")
 
     def update_and_save_auto_landing_params(self):
         """Update and save auto landing parameters"""
@@ -1150,6 +1578,9 @@ class TelemetryApp(QMainWindow):
 
         # Load marker calibrations
         self.load_marker_calibrations()
+
+        # Load marker distance calibrations
+        self.load_marker_distance_calibrations()
 
     def _init_pid_controllers(self):
         gains = self.current_pid_gains

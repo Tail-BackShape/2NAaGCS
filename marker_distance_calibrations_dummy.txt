@@ -1,0 +1,51 @@
+# Dummy ArUco Marker Distance Calibration Data
+# Format: marker_<id>_point_<point>_<param>=<value>
+# Parameters: distance (m), size (px), x (px), y (px)
+
+# Marker 1 calibration points (ID: 1)
+marker_1_point_0_distance=2.0
+marker_1_point_0_size=150.5
+marker_1_point_0_x=320
+marker_1_point_0_y=240
+
+marker_1_point_1_distance=5.0
+marker_1_point_1_size=85.2
+marker_1_point_1_x=315
+marker_1_point_1_y=235
+
+marker_1_point_2_distance=8.0
+marker_1_point_2_size=55.8
+marker_1_point_2_x=318
+marker_1_point_2_y=238
+
+# Marker 2 calibration points (ID: 2)
+marker_2_point_0_distance=1.5
+marker_2_point_0_size=180.3
+marker_2_point_0_x=325
+marker_2_point_0_y=245
+
+marker_2_point_1_distance=4.0
+marker_2_point_1_size=95.7
+marker_2_point_1_x=322
+marker_2_point_1_y=242
+
+marker_2_point_2_distance=7.5
+marker_2_point_2_size=62.1
+marker_2_point_2_x=320
+marker_2_point_2_y=240
+
+# Marker 3 calibration points (ID: 3)
+marker_3_point_0_distance=2.5
+marker_3_point_0_size=135.4
+marker_3_point_0_x=310
+marker_3_point_0_y=250
+
+marker_3_point_1_distance=6.0
+marker_3_point_1_size=78.9
+marker_3_point_1_x=312
+marker_3_point_1_y=248
+
+marker_3_point_2_distance=9.0
+marker_3_point_2_size=48.6
+marker_3_point_2_x=315
+marker_3_point_2_y=245
