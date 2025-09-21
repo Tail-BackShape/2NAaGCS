@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 import requests
 import json
+import os
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -364,6 +365,15 @@ class PositionVisualizationWidget(QWidget):
             self.aruco_markers[marker_id]['detected'] = detected
         self.update()
 
+    def update_marker_data(self, marker_id, size, x, y):
+        """Update marker data with real-time values"""
+        if marker_id in self.aruco_markers:
+            self.aruco_markers[marker_id]['size'] = size
+            self.aruco_markers[marker_id]['x'] = x
+            self.aruco_markers[marker_id]['y'] = y
+            self.aruco_markers[marker_id]['detected'] = size > 0
+        self.update()
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -405,21 +415,27 @@ class PositionVisualizationWidget(QWidget):
 
         # Draw ArUco markers
         for marker_id, marker in self.aruco_markers.items():
-            if self.view_type == "XY":
-                marker_x = center_x + marker['x'] * self.scale
-                marker_y = center_y - marker['y'] * self.scale
-            else:  # ZY view
-                marker_x = center_x + marker['y'] * self.scale  # Y becomes horizontal
-                marker_y = center_y - marker['z'] * self.scale  # Z becomes vertical
+            # Skip if marker not detected
+            if marker.get('size', 0) <= 0:
+                continue
 
-            color = QColor("lime") if marker['detected'] else QColor("red")
+            if self.view_type == "XY":
+                marker_x = center_x + float(marker['x']) * self.scale / 100  # Convert to meters scale
+                marker_y = center_y - float(marker['y']) * self.scale / 100
+            else:  # ZY view
+                marker_x = center_x + float(marker['y']) * self.scale / 100  # Y becomes horizontal
+                marker_y = center_y - float(marker.get('z', 0)) * self.scale  # Z becomes vertical
+
+            # Color based on detection
+            color = QColor("lime") if marker.get('detected', False) or marker.get('size', 0) > 0 else QColor("red")
             painter.setPen(QPen(color, 2))
             painter.setBrush(color)
-            painter.drawEllipse(QPointF(marker_x, marker_y), 5, 5)
+            painter.drawEllipse(QPointF(marker_x, marker_y), 8, 8)
 
-            # Draw marker ID
+            # Draw marker ID and size
             painter.setPen(QPen(QColor("white"), 1))
-            painter.drawText(marker_x + 10, marker_y, f"ID{marker_id}")
+            marker_text = f"ID{marker_id}\nSize: {marker.get('size', 0):.0f}"
+            painter.drawText(marker_x + 12, marker_y - 5, marker_text)
 
         # Draw aircraft position
         if self.view_type == "XY":
@@ -540,6 +556,13 @@ class TelemetryApp(QMainWindow):
             3: {'size': 0, 'id': 0, 'x': 0, 'y': 0}
         }
 
+        # --- ArUco Marker Calibration Data ---
+        self.marker_calibrations = {
+            1: {'offset_x': 0.0, 'offset_y': 0.0, 'offset_angle': 0.0, 'enabled': False},
+            2: {'offset_x': 0.0, 'offset_y': 0.0, 'offset_angle': 0.0, 'enabled': False},
+            3: {'offset_x': 0.0, 'offset_y': 0.0, 'offset_angle': 0.0, 'enabled': False}
+        }
+
         # --- Figure-8 Mission State ---
         self.figure8_phase = 0  # 0: 右旋回フェーズ, 1: 左旋回フェーズ
         self.figure8_completed = False
@@ -655,9 +678,37 @@ class TelemetryApp(QMainWindow):
         self.tab_widget.addTab(auto_landing_widget, "自動離着陸")
 
     def _create_auto_landing_left_panel(self):
-        """Create left panel for auto landing tab - Control inputs display"""
+        """Create left panel for auto landing tab - Control enable, inputs display and parameters"""
         panel = QWidget()
         layout = QVBoxLayout(panel)
+
+        # Auto Landing Enable button (moved from right panel)
+        enable_group = QGroupBox("自動離着陸制御")
+        enable_layout = QVBoxLayout(enable_group)
+
+        self.auto_landing_enable_button = QPushButton("自動離着陸有効化")
+        self.auto_landing_enable_button.setCheckable(True)
+        self.auto_landing_enable_button.setStyleSheet(
+            "QPushButton { background-color: #dc3545; color: white; }"
+            "QPushButton:checked { background-color: #28a745; }"
+        )
+        self.auto_landing_enable_button.clicked.connect(self.toggle_auto_landing)
+        enable_layout.addWidget(self.auto_landing_enable_button)
+
+        # Phase display
+        self.phase_label = QLabel("フェーズ: 手動")
+        self.phase_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #FFD700;")
+        enable_layout.addWidget(self.phase_label)
+
+        # Distance display
+        self.distance_label = QLabel("推定距離: -- m")
+        enable_layout.addWidget(self.distance_label)
+
+        # Altitude debug display
+        self.altitude_debug_label = QLabel("高度: -- m (-- mm)")
+        enable_layout.addWidget(self.altitude_debug_label)
+
+        layout.addWidget(enable_group)
 
         # Auto landing stick displays (reuse existing StickWidget)
         control_group = QGroupBox("操縦量")
@@ -674,6 +725,24 @@ class TelemetryApp(QMainWindow):
         control_layout.addWidget(self.auto_right_stick_label, 1, 1, Qt.AlignCenter)
 
         layout.addWidget(control_group)
+
+        # Parameters panel (moved from right panel)
+        params_group = QGroupBox("制御パラメータ")
+        params_layout = QFormLayout(params_group)
+
+        # Create parameter input fields
+        self.auto_landing_param_edits = {}
+        for label, key, default_value in self.AUTO_LANDING_PARAMS:
+            edit = QLineEdit(default_value)
+            self.auto_landing_param_edits[key] = edit
+            params_layout.addRow(label + ":", edit)
+
+        # Update button
+        update_params_button = QPushButton("パラメータ更新")
+        update_params_button.clicked.connect(self.update_and_save_auto_landing_params)
+        params_layout.addRow(update_params_button)
+
+        layout.addWidget(params_group)
         layout.addStretch()
 
         return panel
@@ -709,40 +778,67 @@ class TelemetryApp(QMainWindow):
         return panel
 
     def _create_auto_landing_right_panel(self):
-        """Create right panel for auto landing tab - Parameter panels and controls"""
+        """Create right panel for auto landing tab - Marker calibration and distance estimation"""
         panel = QWidget()
         layout = QVBoxLayout(panel)
 
-        # Auto Landing Enable button
-        enable_group = QGroupBox("自動離着陸制御")
-        enable_layout = QVBoxLayout(enable_group)
+        # ArUco Marker Individual Calibration
+        marker_calib_group = QGroupBox("ArUcoマーカー個別キャリブレーション")
+        marker_calib_layout = QVBoxLayout(marker_calib_group)
 
-        self.auto_landing_enable_button = QPushButton("自動離着陸有効化")
-        self.auto_landing_enable_button.setCheckable(True)
-        self.auto_landing_enable_button.setStyleSheet(
-            "QPushButton { background-color: #dc3545; color: white; }"
-            "QPushButton:checked { background-color: #28a745; }"
-        )
-        self.auto_landing_enable_button.clicked.connect(self.toggle_auto_landing)
-        enable_layout.addWidget(self.auto_landing_enable_button)
+        # Create individual calibration controls for each marker
+        self.marker_calib_controls = {}
+        for marker_id in [1, 2, 3]:
+            marker_widget = QWidget()
+            marker_layout = QVBoxLayout(marker_widget)
 
-        # Phase display
-        self.phase_label = QLabel("フェーズ: 手動")
-        self.phase_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #FFD700;")
-        enable_layout.addWidget(self.phase_label)
+            # Marker header
+            header_label = QLabel(f"マーカー {marker_id}")
+            header_label.setStyleSheet("font-weight: bold; color: #FFD700;")
+            marker_layout.addWidget(header_label)
 
-        # Distance display
-        self.distance_label = QLabel("推定距離: -- m")
-        enable_layout.addWidget(self.distance_label)
+            # Enable checkbox
+            enable_checkbox = QCheckBox("キャリブレーション有効")
+            enable_checkbox.stateChanged.connect(lambda state, mid=marker_id: self.toggle_marker_calibration(mid, state))
 
-        # Altitude debug display
-        self.altitude_debug_label = QLabel("高度: -- m (-- mm)")
-        enable_layout.addWidget(self.altitude_debug_label)
+            # Position offsets
+            offset_x_input = QLineEdit("0.0")
+            offset_y_input = QLineEdit("0.0")
+            offset_angle_input = QLineEdit("0.0")
 
-        layout.addWidget(enable_group)
+            # Real-time data display
+            realtime_label = QLabel(f"リアルタイム: サイズ=0, X=0, Y=0")
+            realtime_label.setStyleSheet("color: #87CEEB; font-size: 10px;")
+
+            # Calibration buttons
+            set_current_button = QPushButton("現在値をキャリブレーション値に設定")
+            set_current_button.clicked.connect(lambda checked, mid=marker_id: self.set_current_as_calibration(mid))
+
+            marker_form = QFormLayout()
+            marker_form.addRow("有効:", enable_checkbox)
+            marker_form.addRow("X オフセット (m):", offset_x_input)
+            marker_form.addRow("Y オフセット (m):", offset_y_input)
+            marker_form.addRow("角度 オフセット (度):", offset_angle_input)
+            marker_form.addRow("リアルタイムデータ:", realtime_label)
+            marker_form.addRow(set_current_button)
+
+            marker_layout.addLayout(marker_form)
+
+            # Store references
+            self.marker_calib_controls[marker_id] = {
+                'enable': enable_checkbox,
+                'offset_x': offset_x_input,
+                'offset_y': offset_y_input,
+                'offset_angle': offset_angle_input,
+                'realtime': realtime_label
+            }
+
+            marker_calib_layout.addWidget(marker_widget)
+
+        layout.addWidget(marker_calib_group)
 
         # Calibration panel placeholder
-        calib_group = QGroupBox("キャリブレーション")
+        calib_group = QGroupBox("距離推定キャリブレーション")
         calib_layout = QFormLayout(calib_group)
 
         # Calibration distance input
@@ -758,24 +854,6 @@ class TelemetryApp(QMainWindow):
         calib_layout.addRow(self.calib_display)
 
         layout.addWidget(calib_group)
-
-        # Parameters panel
-        params_group = QGroupBox("制御パラメータ")
-        params_layout = QFormLayout(params_group)
-
-        # Create parameter input fields
-        self.auto_landing_param_edits = {}
-        for label, key, default_value in self.AUTO_LANDING_PARAMS:
-            edit = QLineEdit(default_value)
-            self.auto_landing_param_edits[key] = edit
-            params_layout.addRow(label + ":", edit)
-
-        # Update button
-        update_params_button = QPushButton("パラメータ更新")
-        update_params_button.clicked.connect(self.update_and_save_auto_landing_params)
-        params_layout.addRow(update_params_button)
-
-        layout.addWidget(params_group)
 
         layout.addStretch()
 
@@ -923,6 +1001,128 @@ class TelemetryApp(QMainWindow):
                 calib_text += f"{point_name}: {dist:.1f}m -> {size:.1f}px\n"
             self.calib_display.setText(calib_text)
 
+    def toggle_marker_calibration(self, marker_id, state):
+        """Toggle marker calibration enabled state"""
+        enabled = state == 2  # Qt.Checked = 2
+        self.marker_calibrations[marker_id]['enabled'] = enabled
+        print(f"Marker {marker_id} calibration {'enabled' if enabled else 'disabled'}")
+        self.save_marker_calibrations()
+
+    def set_current_as_calibration(self, marker_id):
+        """Set current marker data as calibration baseline"""
+        if marker_id not in self.aruco_markers:
+            print(f"Marker {marker_id} not found")
+            return
+
+        marker_data = self.aruco_markers[marker_id]
+        if marker_data['size'] <= 0:
+            print(f"Marker {marker_id} not currently visible")
+            return
+
+        # Set current position as reference (zero offset)
+        controls = self.marker_calib_controls[marker_id]
+        controls['offset_x'].setText(str(float(marker_data['x'])))
+        controls['offset_y'].setText(str(float(marker_data['y'])))
+        controls['offset_angle'].setText("0.0")
+
+        # Update calibration data
+        self.marker_calibrations[marker_id]['offset_x'] = float(marker_data['x'])
+        self.marker_calibrations[marker_id]['offset_y'] = float(marker_data['y'])
+        self.marker_calibrations[marker_id]['offset_angle'] = 0.0
+
+        print(f"Set marker {marker_id} calibration: X={marker_data['x']}, Y={marker_data['y']}")
+        self.save_marker_calibrations()
+
+    def update_marker_realtime_display(self):
+        """Update real-time marker data display"""
+        for marker_id in [1, 2, 3]:
+            if marker_id in self.marker_calib_controls:
+                marker_data = self.aruco_markers.get(marker_id, {'size': 0, 'x': 0, 'y': 0})
+                realtime_text = f"リアルタイム: サイズ={marker_data['size']}, X={marker_data['x']}, Y={marker_data['y']}"
+
+                # Color coding based on visibility
+                if marker_data['size'] > 0:
+                    self.marker_calib_controls[marker_id]['realtime'].setStyleSheet("color: #00FF00; font-size: 10px;")  # Green
+                else:
+                    self.marker_calib_controls[marker_id]['realtime'].setStyleSheet("color: #FF0000; font-size: 10px;")  # Red
+
+                self.marker_calib_controls[marker_id]['realtime'].setText(realtime_text)
+
+    def get_calibrated_marker_position(self, marker_id):
+        """Get calibrated marker position with offsets applied"""
+        if marker_id not in self.aruco_markers or marker_id not in self.marker_calibrations:
+            return None
+
+        marker_data = self.aruco_markers[marker_id]
+        calib_data = self.marker_calibrations[marker_id]
+
+        if marker_data['size'] <= 0 or not calib_data['enabled']:
+            return None
+
+        # Apply calibration offsets
+        calibrated_x = float(marker_data['x']) - calib_data['offset_x']
+        calibrated_y = float(marker_data['y']) - calib_data['offset_y']
+        calibrated_angle = calib_data['offset_angle']  # Future use for angle correction
+
+        return {
+            'x': calibrated_x,
+            'y': calibrated_y,
+            'angle': calibrated_angle,
+            'size': marker_data['size'],
+            'raw_x': marker_data['x'],
+            'raw_y': marker_data['y']
+        }
+
+    def save_marker_calibrations(self):
+        """Save marker calibrations to file"""
+        try:
+            calib_file = 'marker_calibrations.txt'
+            with open(calib_file, 'w') as f:
+                for marker_id, calib in self.marker_calibrations.items():
+                    f.write(f"marker_{marker_id}_enabled={calib['enabled']}\n")
+                    f.write(f"marker_{marker_id}_offset_x={calib['offset_x']}\n")
+                    f.write(f"marker_{marker_id}_offset_y={calib['offset_y']}\n")
+                    f.write(f"marker_{marker_id}_offset_angle={calib['offset_angle']}\n")
+            print("Marker calibrations saved")
+        except Exception as e:
+            print(f"Failed to save marker calibrations: {e}")
+
+    def load_marker_calibrations(self):
+        """Load marker calibrations from file"""
+        try:
+            calib_file = 'marker_calibrations.txt'
+            if not os.path.exists(calib_file):
+                return
+
+            with open(calib_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+
+                        # Parse marker calibration settings
+                        if key.startswith('marker_') and '_' in key:
+                            parts = key.split('_')
+                            if len(parts) >= 3:
+                                marker_id = int(parts[1])
+                                param = '_'.join(parts[2:])
+
+                                if marker_id in self.marker_calibrations:
+                                    if param == 'enabled':
+                                        self.marker_calibrations[marker_id]['enabled'] = value.lower() == 'true'
+                                        # Update UI checkbox
+                                        if marker_id in self.marker_calib_controls:
+                                            self.marker_calib_controls[marker_id]['enable'].setChecked(value.lower() == 'true')
+                                    elif param in ['offset_x', 'offset_y', 'offset_angle']:
+                                        self.marker_calibrations[marker_id][param] = float(value)
+                                        # Update UI input field
+                                        if marker_id in self.marker_calib_controls:
+                                            self.marker_calib_controls[marker_id][param].setText(str(value))
+
+            print("Marker calibrations loaded")
+        except Exception as e:
+            print(f"Failed to load marker calibrations: {e}")
+
     def update_and_save_auto_landing_params(self):
         """Update and save auto landing parameters"""
         try:
@@ -947,6 +1147,9 @@ class TelemetryApp(QMainWindow):
 
         # Update calibration display
         self.update_calibration_display()
+
+        # Load marker calibrations
+        self.load_marker_calibrations()
 
     def _init_pid_controllers(self):
         gains = self.current_pid_gains
@@ -1657,6 +1860,18 @@ class TelemetryApp(QMainWindow):
                 self.aruco_markers[1] = {'size': aruco1_size, 'id': int(aruco1_id), 'x': aruco1_x, 'y': aruco1_y}
                 self.aruco_markers[2] = {'size': aruco2_size, 'id': int(aruco2_id), 'x': aruco2_x, 'y': aruco2_y}
                 self.aruco_markers[3] = {'size': aruco3_size, 'id': int(aruco3_id), 'x': aruco3_x, 'y': aruco3_y}
+
+                # リアルタイムマーカーデータ更新
+                self.update_marker_realtime_display()
+
+                # Position visualization widgets にマーカーデータを更新
+                self.xy_position_widget.update_marker_data(1, aruco1_size, aruco1_x, aruco1_y)
+                self.xy_position_widget.update_marker_data(2, aruco2_size, aruco2_x, aruco2_y)
+                self.xy_position_widget.update_marker_data(3, aruco3_size, aruco3_x, aruco3_y)
+
+                self.zy_position_widget.update_marker_data(1, aruco1_size, aruco1_x, aruco1_y)
+                self.zy_position_widget.update_marker_data(2, aruco2_size, aruco2_x, aruco2_y)
+                self.zy_position_widget.update_marker_data(3, aruco3_size, aruco3_x, aruco3_y)
 
                 # 前回値を取得
                 prev = self.latest_attitude

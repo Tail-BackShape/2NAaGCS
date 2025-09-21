@@ -1,0 +1,12 @@
+marker_1_enabled=False
+marker_1_offset_x=0.0
+marker_1_offset_y=0.0
+marker_1_offset_angle=0.0
+marker_2_enabled=False
+marker_2_offset_x=0.0
+marker_2_offset_y=0.0
+marker_2_offset_angle=0.0
+marker_3_enabled=False
+marker_3_offset_x=0.0
+marker_3_offset_y=0.0
+marker_3_offset_angle=0.0
