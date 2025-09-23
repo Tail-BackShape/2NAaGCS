@@ -2463,10 +2463,10 @@ class TelemetryApp(QMainWindow):
                 prev_yaw = prev.get('yaw', 0.0)
                 prev_alt = prev.get('alt', 0.0)
 
-                # 姿勢データのフィルタリング（0.0の場合または前回と10度以上違う場合は前回値を使用）
-                roll = roll if (roll != 0.0 and abs(roll - prev_roll) < 10.0) else prev_roll
-                pitch = pitch if (pitch != 0.0 and abs(pitch - prev_pitch) < 10.0) else prev_pitch
-                yaw = yaw if (yaw != 0.0 and abs(yaw - prev_yaw) < 10.0) else prev_yaw
+                # 姿勢データのフィルタリング（0.0の場合のみ前回値を使用）
+                roll = roll if roll != 0.0 else prev_roll
+                pitch = pitch if pitch != 0.0 else prev_pitch
+                yaw = yaw if yaw != 0.0 else prev_yaw
 
                 # 高度データの処理（0.0の場合のみ前回値を使用、それ以外は送信データをそのまま使用）
                 if alt != 0.0:
