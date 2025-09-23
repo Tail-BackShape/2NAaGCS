@@ -1,0 +1,12 @@
+# ArUco Marker Positions (Field Layout)
+# Format: marker_ID_coordinate=value
+
+marker_1_x=-3.0
+marker_1_y=6.0
+marker_1_z=0.0
+marker_2_x=0.0
+marker_2_y=0.0
+marker_2_z=0.0
+marker_3_x=3.0
+marker_3_y=6.0
+marker_3_z=0.0

@@ -2,7 +2,7 @@
     "roll_p": "0.08",
     "roll_i": "0",
     "roll_d": "0",
-    "pitch_p": "0.08",
+    "pitch_p": "0.05",
     "pitch_i": "0",
     "pitch_d": "0.01",
     "yaw_p": "0",
@@ -21,5 +21,8 @@
     "throttle_max": "900",
     "aileron_rudder_mix": "0",
     "rudder_trim_right": "0.4",
-    "rudder_trim_left": "-0.4"
+    "rudder_trim_left": "-0.4",
+    "alt_p": "0.05",
+    "alt_i": "0",
+    "alt_d": "0.01"
 }

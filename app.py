@@ -9,6 +9,8 @@ import numpy as np
 import requests
 import json
 import os
+import glob
+from datetime import datetime
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -101,31 +103,34 @@ class ADIWidget(QWidget):
         self.update()
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        size = min(self.width(), self.height())
-        painter.translate(self.width() / 2, self.height() / 2)
-        painter.scale(size / 200.0, size / 200.0)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor("#2b2b2b"))
-        painter.drawRect(-100, -100, 200, 200)
-        painter.save()
-        pitch_offset = self._pitch * 2
-        painter.translate(0, pitch_offset)
-        painter.rotate(-self._roll)
-        sky_color = QColor("#3282F6")
-        ground_color = QColor("#8B4513")
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(sky_color)
-        painter.drawRect(-300, -300, 600, 300)
-        painter.setBrush(ground_color)
-        painter.drawRect(-300, 0, 600, 300)
-        painter.setPen(QPen(Qt.white, 2))
-        painter.drawLine(-300, 0, 300, 0)
-        painter.restore()
-        painter.setPen(QPen(QColor("yellow"), 3))
-        painter.drawLine(-50, 0, -10, 0)
-        painter.drawLine(10, 0, 50, 0)
-        painter.drawLine(0, -5, 0, 5)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            size = min(self.width(), self.height())
+            painter.translate(self.width() / 2, self.height() / 2)
+            painter.scale(size / 200.0, size / 200.0)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor("#2b2b2b"))
+            painter.drawRect(-100, -100, 200, 200)
+            painter.save()
+            pitch_offset = self._pitch * 2
+            painter.translate(0, pitch_offset)
+            painter.rotate(-self._roll)
+            sky_color = QColor("#3282F6")
+            ground_color = QColor("#8B4513")
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(sky_color)
+            painter.drawRect(-300, -300, 600, 300)
+            painter.setBrush(ground_color)
+            painter.drawRect(-300, 0, 600, 300)
+            painter.setPen(QPen(Qt.white, 2))
+            painter.drawLine(-300, 0, 300, 0)
+            painter.restore()
+            painter.setPen(QPen(QColor("yellow"), 3))
+            painter.drawLine(-50, 0, -10, 0)
+            painter.drawLine(10, 0, 50, 0)
+            painter.drawLine(0, -5, 0, 5)
+        finally:
+            painter.end()
 
 class AltimeterWidget(QWidget):
     def __init__(self, parent=None):
@@ -140,57 +145,60 @@ class AltimeterWidget(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        width = self.width()
-        height = self.height()
-        padding = 10
+            width = self.width()
+            height = self.height()
+            padding = 10
 
-        # Background
-        painter.fillRect(self.rect(), QColor("#2b2b2b"))
+            # Background
+            painter.fillRect(self.rect(), QColor("#2b2b2b"))
 
-        # Bar background
-        bar_rect = QRectF(padding, padding, width - 2 * padding, height - 2 * padding)
-        painter.setPen(QColor("gray"))
-        painter.setBrush(QColor("#444"))
-        painter.drawRect(bar_rect)
+            # Bar background
+            bar_rect = QRectF(padding, padding, width - 2 * padding, height - 2 * padding)
+            painter.setPen(QColor("gray"))
+            painter.setBrush(QColor("#444"))
+            painter.drawRect(bar_rect)
 
-        # Altitude bar fill
-        fill_height_ratio = min(self._altitude / self._max_display_alt, 1.0)
-        if fill_height_ratio < 0: fill_height_ratio = 0
+            # Altitude bar fill
+            fill_height_ratio = min(self._altitude / self._max_display_alt, 1.0)
+            if fill_height_ratio < 0: fill_height_ratio = 0
 
-        fill_height = bar_rect.height() * fill_height_ratio
-        fill_rect = QRectF(bar_rect.left(), bar_rect.bottom() - fill_height, bar_rect.width(), fill_height)
+            fill_height = bar_rect.height() * fill_height_ratio
+            fill_rect = QRectF(bar_rect.left(), bar_rect.bottom() - fill_height, bar_rect.width(), fill_height)
 
-        # Gradient for the bar
-        gradient = QLinearGradient(bar_rect.topLeft(), bar_rect.bottomLeft())
-        gradient.setColorAt(0, QColor("red"))
-        gradient.setColorAt(0.5, QColor("yellow"))
-        gradient.setColorAt(1, QColor("lime"))
+            # Gradient for the bar
+            gradient = QLinearGradient(bar_rect.topLeft(), bar_rect.bottomLeft())
+            gradient.setColorAt(0, QColor("red"))
+            gradient.setColorAt(0.5, QColor("yellow"))
+            gradient.setColorAt(1, QColor("lime"))
 
-        painter.setBrush(gradient)
-        painter.setPen(Qt.NoPen)
-        painter.drawRect(fill_rect)
+            painter.setBrush(gradient)
+            painter.setPen(Qt.NoPen)
+            painter.drawRect(fill_rect)
 
-        # Altitude Text
-        painter.setPen(QColor("white"))
-        font = painter.font()
-        font.setBold(True)
-        font.setPointSize(12)
-        painter.setFont(font)
-        painter.drawText(self.rect(), Qt.AlignCenter | Qt.AlignTop, f"{self._altitude:.1f} m")
+            # Altitude Text
+            painter.setPen(QColor("white"))
+            font = painter.font()
+            font.setBold(True)
+            font.setPointSize(12)
+            painter.setFont(font)
+            painter.drawText(self.rect(), Qt.AlignCenter | Qt.AlignTop, f"{self._altitude:.1f} m")
 
-        # Scale markings
-        painter.setPen(QColor("white"))
-        font.setBold(False)
-        font.setPointSize(8)
-        painter.setFont(font)
-        num_ticks = 5
-        for i in range(num_ticks + 1):
-            tick_alt = (self._max_display_alt / num_ticks) * i
-            y_pos = bar_rect.bottom() - (bar_rect.height() * (i / num_ticks))
-            painter.drawLine(bar_rect.right(), y_pos, bar_rect.right() + 5, y_pos)
-            painter.drawText(QRectF(bar_rect.right() + 7, y_pos - 8, 30, 16), Qt.AlignLeft | Qt.AlignVCenter, str(int(tick_alt)))
+            # Scale markings
+            painter.setPen(QColor("white"))
+            font.setBold(False)
+            font.setPointSize(8)
+            painter.setFont(font)
+            num_ticks = 5
+            for i in range(num_ticks + 1):
+                tick_alt = (self._max_display_alt / num_ticks) * i
+                y_pos = bar_rect.bottom() - (bar_rect.height() * (i / num_ticks))
+                painter.drawLine(bar_rect.right(), y_pos, bar_rect.right() + 5, y_pos)
+                painter.drawText(QRectF(bar_rect.right() + 7, y_pos - 8, 30, 16), Qt.AlignLeft | Qt.AlignVCenter, str(int(tick_alt)))
+        finally:
+            painter.end()
 
 class StickWidget(QWidget):
     def __init__(self, x_label, y_label, parent=None):
@@ -220,32 +228,35 @@ class StickWidget(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(QColor("#2b2b2b"))
-        painter.setPen(QColor("gray"))
-        painter.drawRect(0, 0, self.width()-1, self.height()-1)
-        pen = QPen(QColor("gray"), 1, Qt.DashLine)
-        painter.setPen(pen)
-        painter.drawLine(self.width()/2, 5, self.width()/2, self.height()-5)
-        painter.drawLine(5, self.height()/2, self.width()-5, self.height()/2)
-        painter.setPen(QColor("white"))
-        painter.drawText(QRectF(0, 0, self.width(), 15), Qt.AlignCenter, self._y_label)
-        painter.drawText(QRectF(self.width() - 35, 0, 35, self.height()), Qt.AlignCenter, self._x_label)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setBrush(QColor("#2b2b2b"))
+            painter.setPen(QColor("gray"))
+            painter.drawRect(0, 0, self.width()-1, self.height()-1)
+            pen = QPen(QColor("gray"), 1, Qt.DashLine)
+            painter.setPen(pen)
+            painter.drawLine(self.width()/2, 5, self.width()/2, self.height()-5)
+            painter.drawLine(5, self.height()/2, self.width()-5, self.height()/2)
+            painter.setPen(QColor("white"))
+            painter.drawText(QRectF(0, 0, self.width(), 15), Qt.AlignCenter, self._y_label)
+            painter.drawText(QRectF(self.width() - 35, 0, 35, self.height()), Qt.AlignCenter, self._x_label)
 
-        # 現在のプロポ入力位置（シアン）
-        center_x = self.width()/2 + self._x * (self.width()/2 - 10)
-        center_y = self.height()/2 - self._y * (self.height()/2 - 10)
-        painter.setBrush(QColor("cyan"))
-        painter.setPen(QColor("white"))
-        painter.drawEllipse(QPointF(center_x, center_y), 5, 5)
+            # 現在のプロポ入力位置（シアン）
+            center_x = self.width()/2 + self._x * (self.width()/2 - 10)
+            center_y = self.height()/2 - self._y * (self.height()/2 - 10)
+            painter.setBrush(QColor("cyan"))
+            painter.setPen(QColor("white"))
+            painter.drawEllipse(QPointF(center_x, center_y), 5, 5)
 
-        # 自動操縦時の目標位置（黄色）
-        if self._autopilot_active and self._autopilot_x is not None and self._autopilot_y is not None:
-            autopilot_x = self.width()/2 + self._autopilot_x * (self.width()/2 - 10)
-            autopilot_y = self.height()/2 - self._autopilot_y * (self.height()/2 - 10)
-            painter.setBrush(QColor("yellow"))
-            painter.setPen(QColor("black"))
-            painter.drawEllipse(QPointF(autopilot_x, autopilot_y), 7, 7)
+            # 自動操縦時の目標位置（黄色）
+            if self._autopilot_active and self._autopilot_x is not None and self._autopilot_y is not None:
+                autopilot_x = self.width()/2 + self._autopilot_x * (self.width()/2 - 10)
+                autopilot_y = self.height()/2 - self._autopilot_y * (self.height()/2 - 10)
+                painter.setBrush(QColor("yellow"))
+                painter.setPen(QColor("black"))
+                painter.drawEllipse(QPointF(autopilot_x, autopilot_y), 7, 7)
+        finally:
+            painter.end()
 
 class Attitude2DWidget(QWidget):
     def __init__(self, image_path, parent=None):
@@ -272,75 +283,78 @@ class Attitude2DWidget(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
-        widget_rect = self.rect()
-        painter.fillRect(widget_rect, QColor("#2b2b2b"))
+            widget_rect = self.rect()
+            painter.fillRect(widget_rect, QColor("#2b2b2b"))
 
-        if not self.pixmap.isNull():
-            # 1. 画像が回転しても収まるようにスケーリング計算
-            # 画像の対角線の長さがウィジェットの短辺に収まるようにする
-            img_diagonal = math.sqrt(self.pixmap.width()**2 + self.pixmap.height()**2)
-            widget_min_side = min(widget_rect.width(), widget_rect.height())
+            if not self.pixmap.isNull():
+                # 1. 画像が回転しても収まるようにスケーリング計算
+                # 画像の対角線の長さがウィジェットの短辺に収まるようにする
+                img_diagonal = math.sqrt(self.pixmap.width()**2 + self.pixmap.height()**2)
+                widget_min_side = min(widget_rect.width(), widget_rect.height())
 
-            # パディングを少し加える
-            scale_factor = (widget_min_side * 0.9) / img_diagonal if img_diagonal > 0 else 1.0
+                # パディングを少し加える
+                scale_factor = (widget_min_side * 0.9) / img_diagonal if img_diagonal > 0 else 1.0
 
-            scaled_pixmap = self.pixmap.scaled(
-                int(self.pixmap.width() * scale_factor),
-                int(self.pixmap.height() * scale_factor),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
-            )
+                scaled_pixmap = self.pixmap.scaled(
+                    int(self.pixmap.width() * scale_factor),
+                    int(self.pixmap.height() * scale_factor),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                )
 
-            # 2. 回転と描画
-            transform = QTransform()
-            # ウィジェットの中心に移動
-            transform.translate(widget_rect.center().x(), widget_rect.center().y())
-            # 回転
-            transform.rotate(self._angle)
-            # 画像の中心が原点に来るように移動
-            transform.translate(-scaled_pixmap.width() / 2, -scaled_pixmap.height() / 2)
+                # 2. 回転と描画
+                transform = QTransform()
+                # ウィジェットの中心に移動
+                transform.translate(widget_rect.center().x(), widget_rect.center().y())
+                # 回転
+                transform.rotate(self._angle)
+                # 画像の中心が原点に来るように移動
+                transform.translate(-scaled_pixmap.width() / 2, -scaled_pixmap.height() / 2)
 
-            painter.setTransform(transform)
-            painter.drawPixmap(0, 0, scaled_pixmap)
+                painter.setTransform(transform)
+                painter.drawPixmap(0, 0, scaled_pixmap)
 
-            # 3. 目標角度の表示（自動操縦時のみ）
-            if self._autopilot_active and self._target_angle is not None:
-                painter.resetTransform()
-                center = widget_rect.center()
-                radius = widget_min_side * 0.4
+                # 3. 目標角度の表示（自動操縦時のみ）
+                if self._autopilot_active and self._target_angle is not None:
+                    painter.resetTransform()
+                    center = widget_rect.center()
+                    radius = widget_min_side * 0.4
 
-                # 目標角度のライン（赤色）
-                target_rad = math.radians(self._target_angle - 90)  # -90で上方向を0度とする
-                target_x = center.x() + radius * math.cos(target_rad)
-                target_y = center.y() + radius * math.sin(target_rad)
+                    # 目標角度のライン（赤色）
+                    target_rad = math.radians(self._target_angle - 90)  # -90で上方向を0度とする
+                    target_x = center.x() + radius * math.cos(target_rad)
+                    target_y = center.y() + radius * math.sin(target_rad)
 
-                painter.setPen(QPen(QColor("red"), 3))
-                painter.drawLine(center.x(), center.y(), target_x, target_y)
+                    painter.setPen(QPen(QColor("red"), 3))
+                    painter.drawLine(center.x(), center.y(), target_x, target_y)
 
-                # 現在角度のライン（緑色）
-                current_rad = math.radians(self._angle - 90)
-                current_x = center.x() + radius * 0.8 * math.cos(current_rad)
-                current_y = center.y() + radius * 0.8 * math.sin(current_rad)
+                    # 現在角度のライン（緑色）
+                    current_rad = math.radians(self._angle - 90)
+                    current_x = center.x() + radius * 0.8 * math.cos(current_rad)
+                    current_y = center.y() + radius * 0.8 * math.sin(current_rad)
 
-                painter.setPen(QPen(QColor("lime"), 2))
-                painter.drawLine(center.x(), center.y(), current_x, current_y)
+                    painter.setPen(QPen(QColor("lime"), 2))
+                    painter.drawLine(center.x(), center.y(), current_x, current_y)
 
-                # 角度値の表示
-                painter.setPen(QPen(QColor("white"), 1))
-                font = painter.font()
-                font.setPointSize(10)
-                painter.setFont(font)
+                    # 角度値の表示
+                    painter.setPen(QPen(QColor("white"), 1))
+                    font = painter.font()
+                    font.setPointSize(10)
+                    painter.setFont(font)
 
-                text_rect = QRectF(5, 5, widget_rect.width() - 10, 30)
-                painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignTop,
-                               f"目標: {self._target_angle:.1f}°")
+                    text_rect = QRectF(5, 5, widget_rect.width() - 10, 30)
+                    painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignTop,
+                                   f"目標: {self._target_angle:.1f}°")
 
-                text_rect = QRectF(5, 25, widget_rect.width() - 10, 30)
-                painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignTop,
-                               f"現在: {self._angle:.1f}°")
+                    text_rect = QRectF(5, 25, widget_rect.width() - 10, 30)
+                    painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignTop,
+                                   f"現在: {self._angle:.1f}°")
+        finally:
+            painter.end()
 
 # --- Position Visualization Widgets for Auto Landing ---
 class PositionVisualizationWidget(QWidget):
@@ -349,11 +363,11 @@ class PositionVisualizationWidget(QWidget):
         self.setMinimumSize(400, 300)
         self.view_type = view_type  # "XY" or "ZY"
         self.aircraft_pos = {'x': 0.0, 'y': 0.0, 'z': 0.0}
-        # Default marker positions (can be modified)
+        # Default marker field positions (manual setting only, separate from image coordinates)
         self.aruco_markers = {
-            1: {'x': -3.0, 'y': 6.0, 'z': 0.0, 'detected': False},
-            2: {'x': 0.0, 'y': 0.0, 'z': 0.0, 'detected': False},
-            3: {'x': 3.0, 'y': 6.0, 'z': 0.0, 'detected': False}
+            1: {'x': -3.0, 'y': 6.0, 'z': 0.0, 'image_x': 0, 'image_y': 0, 'size': 0, 'detected': False},
+            2: {'x': 0.0, 'y': 0.0, 'z': 0.0, 'image_x': 0, 'image_y': 0, 'size': 0, 'detected': False},
+            3: {'x': 3.0, 'y': 6.0, 'z': 0.0, 'image_x': 0, 'image_y': 0, 'size': 0, 'detected': False}
         }
         self.scale = 10.0  # pixels per meter
 
@@ -370,20 +384,22 @@ class PositionVisualizationWidget(QWidget):
         self.update()
 
     def update_marker_data(self, marker_id, size, x, y):
-        """Update marker data with real-time values"""
+        """Update marker data with real-time image coordinate values (from camera)"""
         if marker_id in self.aruco_markers:
+            # Store image coordinates separately from field coordinates
             self.aruco_markers[marker_id]['size'] = size
-            self.aruco_markers[marker_id]['x'] = x
-            self.aruco_markers[marker_id]['y'] = y
+            self.aruco_markers[marker_id]['image_x'] = x  # Image coordinates from camera
+            self.aruco_markers[marker_id]['image_y'] = y  # Image coordinates from camera
             self.aruco_markers[marker_id]['detected'] = size > 0
         self.update()
 
     def set_marker_position(self, marker_id, x, y, z=0.0):
-        """Set marker position (for field setup)"""
+        """Set marker field position (for flight control layout, manual setting only)"""
         if marker_id in self.aruco_markers:
-            self.aruco_markers[marker_id]['x'] = x
-            self.aruco_markers[marker_id]['y'] = y
-            self.aruco_markers[marker_id]['z'] = z
+            # Field coordinates for landing control (separate from image coordinates)
+            self.aruco_markers[marker_id]['x'] = x  # Field coordinates in meters
+            self.aruco_markers[marker_id]['y'] = y  # Field coordinates in meters
+            self.aruco_markers[marker_id]['z'] = z  # Field coordinates in meters
         self.update()
 
     def get_marker_positions(self):
@@ -438,113 +454,116 @@ class PositionVisualizationWidget(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Background
-        painter.fillRect(self.rect(), QColor("#2b2b2b"))
+            # Background
+            painter.fillRect(self.rect(), QColor("#2b2b2b"))
 
-        # Get widget center
-        center_x = self.width() / 2
-        center_y = self.height() / 2
+            # Get widget center
+            center_x = self.width() / 2
+            center_y = self.height() / 2
 
-        # Draw coordinate grid
-        painter.setPen(QPen(QColor("gray"), 1, Qt.DashLine))
-        for i in range(-20, 21, 5):
-            # Vertical lines
-            x_pos = center_x + i * self.scale
-            if 0 <= x_pos <= self.width():
-                painter.drawLine(x_pos, 0, x_pos, self.height())
+            # Draw coordinate grid
+            painter.setPen(QPen(QColor("gray"), 1, Qt.DashLine))
+            for i in range(-20, 21, 5):
+                # Vertical lines
+                x_pos = center_x + i * self.scale
+                if 0 <= x_pos <= self.width():
+                    painter.drawLine(x_pos, 0, x_pos, self.height())
 
-            # Horizontal lines
-            y_pos = center_y - i * self.scale
-            if 0 <= y_pos <= self.height():
-                painter.drawLine(0, y_pos, self.width(), y_pos)
+                # Horizontal lines
+                y_pos = center_y - i * self.scale
+                if 0 <= y_pos <= self.height():
+                    painter.drawLine(0, y_pos, self.width(), y_pos)
 
-        # Draw axes
-        painter.setPen(QPen(QColor("white"), 2))
-        painter.drawLine(center_x, 0, center_x, self.height())  # Y axis
-        painter.drawLine(0, center_y, self.width(), center_y)   # X axis
+            # Draw axes
+            painter.setPen(QPen(QColor("white"), 2))
+            painter.drawLine(center_x, 0, center_x, self.height())  # Y axis
+            painter.drawLine(0, center_y, self.width(), center_y)   # X axis
 
-        # Draw runway representation
-        painter.setPen(QPen(QColor("yellow"), 3))
-        if self.view_type == "XY":
-            # Runway from Y=0 to Y=33
-            runway_start_y = center_y
-            runway_end_y = center_y - 33 * self.scale
-            painter.drawLine(center_x - 10, runway_start_y, center_x + 10, runway_start_y)
-            painter.drawLine(center_x - 10, runway_end_y, center_x + 10, runway_end_y)
-            painter.drawLine(center_x, runway_start_y, center_x, runway_end_y)
-
-        # Draw ArUco markers (both configured positions and real-time detections)
-        for marker_id, marker in self.aruco_markers.items():
+            # Draw runway representation
+            painter.setPen(QPen(QColor("yellow"), 3))
             if self.view_type == "XY":
-                # Use configured field positions for markers
-                marker_x = center_x + float(marker['x']) * self.scale
-                marker_y = center_y - float(marker['y']) * self.scale
+                # Runway from Y=0 to Y=33
+                runway_start_y = center_y
+                runway_end_y = center_y + 33 * self.scale  # Y軸正負を反転
+                painter.drawLine(center_x - 10, runway_start_y, center_x + 10, runway_start_y)
+                painter.drawLine(center_x - 10, runway_end_y, center_x + 10, runway_end_y)
+                painter.drawLine(center_x, runway_start_y, center_x, runway_end_y)
+
+            # Draw ArUco markers (both configured positions and real-time detections)
+            for marker_id, marker in self.aruco_markers.items():
+                if self.view_type == "XY":
+                    # Use configured field positions for markers
+                    marker_x = center_x + float(marker['x']) * self.scale
+                    marker_y = center_y + float(marker['y']) * self.scale  # Y軸正負を反転
+                else:  # ZY view
+                    marker_x = center_x + float(marker['y']) * self.scale
+                    marker_y = center_y - float(marker.get('z', 0)) * self.scale  # Z軸は上が正（変更なし）
+
+                # Color based on detection status
+                is_detected = marker.get('detected', False) or marker.get('size', 0) > 0
+                color = QColor("lime") if is_detected else QColor("orange")
+
+                painter.setPen(QPen(color, 2))
+                painter.setBrush(QBrush(color))
+
+                # Draw marker as square (more representative of ArUco markers)
+                marker_size = 12
+                marker_rect = QRectF(marker_x - marker_size/2, marker_y - marker_size/2, marker_size, marker_size)
+                painter.drawRect(marker_rect)
+
+                # Draw marker ID and position info with units
+                painter.setPen(QPen(QColor("white"), 1))
+                if self.view_type == "XY":
+                    marker_info = f"ID{marker_id}\n({marker['x']:.1f}m, {marker['y']:.1f}m)"
+                    if is_detected:
+                        marker_info += f"\nサイズ: {marker.get('size', 0):.0f}px"
+                else:
+                    marker_info = f"ID{marker_id}\n({marker['y']:.1f}m, {marker.get('z', 0):.1f}m)"
+                    if is_detected:
+                        marker_info += f"\nサイズ: {marker.get('size', 0):.0f}px"
+
+                painter.drawText(marker_x + marker_size/2 + 5, marker_y - marker_size/2, marker_info)
+
+            # Draw aircraft position
+            if self.view_type == "XY":
+                aircraft_x = center_x + self.aircraft_pos['x'] * self.scale
+                aircraft_y = center_y + self.aircraft_pos['y'] * self.scale  # Y軸正負を反転
             else:  # ZY view
-                marker_x = center_x + float(marker['y']) * self.scale
-                marker_y = center_y - float(marker.get('z', 0)) * self.scale
+                aircraft_x = center_x + self.aircraft_pos['y'] * self.scale
+                aircraft_y = center_y - self.aircraft_pos['z'] * self.scale  # Z軸は上が正（変更なし）
 
-            # Color based on detection status
-            is_detected = marker.get('detected', False) or marker.get('size', 0) > 0
-            color = QColor("lime") if is_detected else QColor("orange")
+            painter.setPen(QPen(QColor("cyan"), 3))
+            painter.setBrush(QColor("cyan"))
+            # Draw aircraft as triangle
+            aircraft_size = 8
+            triangle = QPolygonF([
+                QPointF(aircraft_x, aircraft_y - aircraft_size),
+                QPointF(aircraft_x - aircraft_size/2, aircraft_y + aircraft_size/2),
+                QPointF(aircraft_x + aircraft_size/2, aircraft_y + aircraft_size/2)
+            ])
+            painter.drawPolygon(triangle)
 
-            painter.setPen(QPen(color, 2))
-            painter.setBrush(QBrush(color))
-
-            # Draw marker as square (more representative of ArUco markers)
-            marker_size = 12
-            marker_rect = QRectF(marker_x - marker_size/2, marker_y - marker_size/2, marker_size, marker_size)
-            painter.drawRect(marker_rect)
-
-            # Draw marker ID and position info
+            # Draw labels
             painter.setPen(QPen(QColor("white"), 1))
+            font = painter.font()
+            font.setPointSize(10)
+            painter.setFont(font)
+
+            title = f"{self.view_type}平面表示"
+            painter.drawText(10, 20, title)
+
+            # Draw axis labels
             if self.view_type == "XY":
-                marker_info = f"ID{marker_id}\n({marker['x']:.1f}, {marker['y']:.1f})"
-                if is_detected:
-                    marker_info += f"\nSize: {marker.get('size', 0):.0f}"
+                painter.drawText(self.width() - 30, center_y - 10, "X")
+                painter.drawText(center_x + 10, self.height() - 15, "Y")  # Y軸ラベルを下に移動
             else:
-                marker_info = f"ID{marker_id}\n({marker['y']:.1f}, {marker.get('z', 0):.1f})"
-                if is_detected:
-                    marker_info += f"\nSize: {marker.get('size', 0):.0f}"
-
-            painter.drawText(marker_x + marker_size/2 + 5, marker_y - marker_size/2, marker_info)
-
-        # Draw aircraft position
-        if self.view_type == "XY":
-            aircraft_x = center_x + self.aircraft_pos['x'] * self.scale
-            aircraft_y = center_y - self.aircraft_pos['y'] * self.scale
-        else:  # ZY view
-            aircraft_x = center_x + self.aircraft_pos['y'] * self.scale
-            aircraft_y = center_y - self.aircraft_pos['z'] * self.scale
-
-        painter.setPen(QPen(QColor("cyan"), 3))
-        painter.setBrush(QColor("cyan"))
-        # Draw aircraft as triangle
-        aircraft_size = 8
-        triangle = QPolygonF([
-            QPointF(aircraft_x, aircraft_y - aircraft_size),
-            QPointF(aircraft_x - aircraft_size/2, aircraft_y + aircraft_size/2),
-            QPointF(aircraft_x + aircraft_size/2, aircraft_y + aircraft_size/2)
-        ])
-        painter.drawPolygon(triangle)
-
-        # Draw labels
-        painter.setPen(QPen(QColor("white"), 1))
-        font = painter.font()
-        font.setPointSize(10)
-        painter.setFont(font)
-
-        title = f"{self.view_type}平面表示"
-        painter.drawText(10, 20, title)
-
-        # Draw axis labels
-        if self.view_type == "XY":
-            painter.drawText(self.width() - 30, center_y - 10, "X")
-            painter.drawText(center_x + 10, 15, "Y")
-        else:
-            painter.drawText(self.width() - 30, center_y - 10, "Y")
-            painter.drawText(center_x + 10, 15, "Z")
+                painter.drawText(self.width() - 30, center_y - 10, "Y")
+                painter.drawText(center_x + 10, 15, "Z (高度)")  # Z軸を高度として明記
+        finally:
+            painter.end()
 
 # --- Calibration Graph Widget ---
 class CalibrationGraphWidget(QWidget):
@@ -566,13 +585,16 @@ class CalibrationGraphWidget(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Background
-        painter.fillRect(self.rect(), QColor("#2b2b2b"))
+            # Background
+            painter.fillRect(self.rect(), QColor("#2b2b2b"))
 
-        # Draw graph
-        self._draw_graph(painter)
+            # Draw graph
+            self._draw_graph(painter)
+        finally:
+            painter.end()
 
     def _draw_graph(self, painter):
         """Draw calibration graph"""
@@ -585,6 +607,11 @@ class CalibrationGraphWidget(QWidget):
         # Graph area
         margin = 50
         graph_rect = QRectF(margin, margin, self.width() - 2 * margin, self.height() - 2 * margin)
+
+        # Draw graph background
+        painter.setPen(QPen(QColor("#404040"), 1))
+        painter.setBrush(QBrush(QColor("#1e1e1e")))  # Slightly lighter background for graph area
+        painter.drawRect(graph_rect)
 
         # Draw axes
         painter.setPen(QPen(QColor("white"), 2))
@@ -624,6 +651,9 @@ class CalibrationGraphWidget(QWidget):
         min_size -= size_range * 0.1
         max_size += size_range * 0.1
 
+        # Draw grid lines and tick marks
+        self._draw_grid_and_ticks(painter, graph_rect, min_dist, max_dist, min_size, max_size)
+
         # Draw data points and lines for each marker
         colors = [QColor("red"), QColor("green"), QColor("blue")]
 
@@ -642,12 +672,15 @@ class CalibrationGraphWidget(QWidget):
                     y = graph_rect.bottom() - (point['size'] - min_size) / (max_size - min_size) * graph_rect.height()
                     points.append(QPointF(x, y))
 
-                    # Draw point
-                    painter.drawEllipse(QPointF(x, y), 4, 4)
+                    # Draw point with white border for better visibility
+                    painter.setPen(QPen(QColor("white"), 1))  # White border
+                    painter.setBrush(QBrush(color))  # Colored fill
+                    painter.drawEllipse(QPointF(x, y), 6, 6)  # Slightly larger point
 
             # Draw connecting lines
             if len(points) > 1:
-                painter.setPen(QPen(color, 1, Qt.DashLine))
+                painter.setPen(QPen(color, 2, Qt.DashLine))  # Thicker dashed line
+                painter.setBrush(QBrush())  # No fill for lines
                 for i in range(len(points) - 1):
                     painter.drawLine(points[i], points[i + 1])
 
@@ -667,12 +700,95 @@ class CalibrationGraphWidget(QWidget):
                 painter.setPen(QPen(QColor("white"), 1))
                 painter.drawText(graph_rect.right() - 95, legend_y + i * 20 + 5, f"マーカー {marker_id}")
 
+    def _draw_grid_and_ticks(self, painter, graph_rect, min_dist, max_dist, min_size, max_size):
+        """Draw grid lines and tick marks with labels"""
+
+        # Grid line style
+        grid_pen = QPen(QColor("#404040"), 1)  # Dark gray grid
+        painter.setPen(grid_pen)
+
+        # Tick mark style
+        tick_pen = QPen(QColor("white"), 1)
+
+        # Calculate nice tick intervals
+        dist_range = max_dist - min_dist
+        size_range = max_size - min_size
+
+        # Distance (X-axis) ticks - aim for about 5-8 divisions
+        if dist_range > 0:
+            dist_step = self._calculate_nice_step(dist_range, 6)
+            dist_start = math.ceil(min_dist / dist_step) * dist_step
+
+            # Draw vertical grid lines and X-axis ticks
+            dist = dist_start
+            while dist <= max_dist:
+                x_pos = graph_rect.left() + (dist - min_dist) / (max_dist - min_dist) * graph_rect.width()
+
+                # Grid line
+                painter.setPen(grid_pen)
+                painter.drawLine(x_pos, graph_rect.top(), x_pos, graph_rect.bottom())
+
+                # Tick mark
+                painter.setPen(tick_pen)
+                painter.drawLine(x_pos, graph_rect.bottom(), x_pos, graph_rect.bottom() + 5)
+
+                # Tick label
+                painter.drawText(QRectF(x_pos - 20, graph_rect.bottom() + 8, 40, 20),
+                               Qt.AlignCenter, f"{dist:.1f}")
+
+                dist += dist_step
+
+        # Size (Y-axis) ticks - aim for about 5-8 divisions
+        if size_range > 0:
+            size_step = self._calculate_nice_step(size_range, 6)
+            size_start = math.ceil(min_size / size_step) * size_step
+
+            # Draw horizontal grid lines and Y-axis ticks
+            size = size_start
+            while size <= max_size:
+                y_pos = graph_rect.bottom() - (size - min_size) / (max_size - min_size) * graph_rect.height()
+
+                # Grid line
+                painter.setPen(grid_pen)
+                painter.drawLine(graph_rect.left(), y_pos, graph_rect.right(), y_pos)
+
+                # Tick mark
+                painter.setPen(tick_pen)
+                painter.drawLine(graph_rect.left() - 5, y_pos, graph_rect.left(), y_pos)
+
+                # Tick label
+                painter.drawText(QRectF(graph_rect.left() - 45, y_pos - 10, 35, 20),
+                               Qt.AlignRight | Qt.AlignVCenter, f"{size:.0f}")
+
+                size += size_step
+
+    def _calculate_nice_step(self, range_val, target_divisions):
+        """Calculate a nice step size for grid divisions"""
+        rough_step = range_val / target_divisions
+        magnitude = math.pow(10, math.floor(math.log10(rough_step)))
+
+        # Normalize to 1-10 range
+        normalized = rough_step / magnitude
+
+        # Choose nice step size
+        if normalized <= 1.0:
+            nice_step = 1.0
+        elif normalized <= 2.0:
+            nice_step = 2.0
+        elif normalized <= 5.0:
+            nice_step = 5.0
+        else:
+            nice_step = 10.0
+
+        return nice_step * magnitude
+
 # --- Main Application Window ---
 class TelemetryApp(QMainWindow):
     GAINS_TO_TUNE = [
         ("Roll P", "roll_p", "0.1"), ("Roll I", "roll_i", "0.01"), ("Roll D", "roll_d", "0.05"),
         ("Pitch P", "pitch_p", "0.1"), ("Pitch I", "pitch_i", "0.01"), ("Pitch D", "pitch_d", "0.05"),
         ("Yaw P", "yaw_p", "0.2"), ("Yaw I", "yaw_i", "0.0"), ("Yaw D", "yaw_d", "0.0"),
+        ("Altitude P", "alt_p", "0.1"), ("Altitude I", "alt_i", "0.02"), ("Altitude D", "alt_d", "0.05"),
     ]
 
     # 自動操縦パラメータ
@@ -745,17 +861,20 @@ class TelemetryApp(QMainWindow):
 
         # --- ArUco Marker Data ---
         self.aruco_markers = {
-            1: {'size': 0, 'id': 0, 'x': 0, 'y': 0},
-            2: {'size': 0, 'id': 0, 'x': 0, 'y': 0},
-            3: {'size': 0, 'id': 0, 'x': 0, 'y': 0}
+            1: {'size': 0, 'id': 0, 'image_x': 0, 'image_y': 0, 'x': -3.0, 'y': 6.0, 'z': 0.0, 'detected': False},
+            2: {'size': 0, 'id': 0, 'image_x': 0, 'image_y': 0, 'x': 0.0, 'y': 0.0, 'z': 0.0, 'detected': False},
+            3: {'size': 0, 'id': 0, 'image_x': 0, 'image_y': 0, 'x': 3.0, 'y': 6.0, 'z': 0.0, 'detected': False}
         }
 
         # --- ArUco Marker Calibration Data ---
         self.marker_calibrations = {
-            1: {'offset_x': 0.0, 'offset_y': 0.0, 'offset_angle': 0.0},
-            2: {'offset_x': 0.0, 'offset_y': 0.0, 'offset_angle': 0.0},
-            3: {'offset_x': 0.0, 'offset_y': 0.0, 'offset_angle': 0.0}
+            1: {'offset_angle': 0.0},
+            2: {'offset_angle': 0.0},
+            3: {'offset_angle': 0.0}
         }
+
+        # --- ArUco Marker Distance Calibration Data ---
+        self.marker_distance_calibrations = {}  # Initialize empty, will be loaded from file
 
         # --- Figure-8 Mission State ---
         self.figure8_phase = 0  # 0: 右旋回フェーズ, 1: 左旋回フェーズ
@@ -1075,13 +1194,11 @@ class TelemetryApp(QMainWindow):
             header_label.setStyleSheet("font-weight: bold; color: #FFD700;")
             marker_layout.addWidget(header_label)
 
-            # Position offsets
-            offset_x_input = QLineEdit("0.0")
-            offset_y_input = QLineEdit("0.0")
+            # Angle offset only (X,Y offsets removed as they are different from landing control coordinates)
             offset_angle_input = QLineEdit("0.0")
 
-            # Real-time data display
-            realtime_label = QLabel(f"リアルタイム: サイズ=0, X=0, Y=0")
+            # Real-time data display with units
+            realtime_label = QLabel(f"リアルタイム: サイズ=0px, 画像X=0px, 画像Y=0px")
             realtime_label.setStyleSheet("color: #87CEEB; font-size: 10px;")
 
             # Calibration buttons
@@ -1096,8 +1213,6 @@ class TelemetryApp(QMainWindow):
             record_distance_button.setEnabled(False)  # Initially disabled
 
             marker_form = QFormLayout()
-            marker_form.addRow("X オフセット (m):", offset_x_input)
-            marker_form.addRow("Y オフセット (m):", offset_y_input)
             marker_form.addRow("角度 オフセット (度):", offset_angle_input)
             marker_form.addRow("リアルタイムデータ:", realtime_label)
             marker_form.addRow(set_current_button)
@@ -1106,10 +1221,8 @@ class TelemetryApp(QMainWindow):
 
             marker_layout.addLayout(marker_form)
 
-            # Store references
+            # Store references (X,Y offset removed as they are different from landing control coordinates)
             self.marker_calib_controls[marker_id] = {
-                'offset_x': offset_x_input,
-                'offset_y': offset_y_input,
                 'offset_angle': offset_angle_input,
                 'realtime': realtime_label,
                 'distance_input': distance_input,
@@ -1149,19 +1262,19 @@ class TelemetryApp(QMainWindow):
         refresh_button = QPushButton("グラフ更新")
         refresh_button.clicked.connect(self.update_calibration_graph)
 
-        # Save calibration data button
-        save_calib_button = QPushButton("キャリブレーションデータ保存")
-        save_calib_button.clicked.connect(self.export_calibration_data)
+        # Backup calibration data button
+        backup_calib_button = QPushButton("キャリブレーションデータバックアップ")
+        backup_calib_button.clicked.connect(self.backup_calibration_data)
 
-        # Load calibration data button
-        load_calib_button = QPushButton("キャリブレーションデータ読み込み")
-        load_calib_button.clicked.connect(self.import_calibration_data)
+        # Restore calibration data button
+        restore_calib_button = QPushButton("キャリブレーションデータ復元")
+        restore_calib_button.clicked.connect(self.restore_calibration_data)
 
         control_layout.addWidget(marker_select_label)
         control_layout.addWidget(self.graph_marker_combo)
         control_layout.addWidget(refresh_button)
-        control_layout.addWidget(save_calib_button)
-        control_layout.addWidget(load_calib_button)
+        control_layout.addWidget(backup_calib_button)
+        control_layout.addWidget(restore_calib_button)
         control_layout.addStretch()
 
         main_layout.addWidget(control_panel)
@@ -1336,18 +1449,14 @@ class TelemetryApp(QMainWindow):
             print(f"Marker {marker_id} not currently visible")
             return
 
-        # Set current position as reference (zero offset)
+        # Set angle calibration only (X,Y offset removed as they are different from landing control coordinates)
         controls = self.marker_calib_controls[marker_id]
-        controls['offset_x'].setText(str(float(marker_data['x'])))
-        controls['offset_y'].setText(str(float(marker_data['y'])))
         controls['offset_angle'].setText("0.0")
 
         # Update calibration data
-        self.marker_calibrations[marker_id]['offset_x'] = float(marker_data['x'])
-        self.marker_calibrations[marker_id]['offset_y'] = float(marker_data['y'])
         self.marker_calibrations[marker_id]['offset_angle'] = 0.0
 
-        print(f"Set marker {marker_id} calibration: X={marker_data['x']}, Y={marker_data['y']}")
+        print(f"Set marker {marker_id} angle calibration to 0.0 degrees")
         self.save_marker_calibrations()
 
     def update_marker_realtime_display(self):
@@ -1364,10 +1473,14 @@ class TelemetryApp(QMainWindow):
                 self.marker_calib_controls[marker_id]['record_distance_button'].setEnabled(is_visible)
 
                 # Estimate distance if calibration data is available
-                estimated_distance = self.estimate_distance_from_marker(marker_id)
-                distance_text = f", 推定距離={estimated_distance:.2f}m" if estimated_distance is not None else ""
+                try:
+                    estimated_distance = self.estimate_distance_from_marker(marker_id)
+                    distance_text = f", 推定距離={estimated_distance:.2f}m" if estimated_distance is not None else ""
+                except Exception as e:
+                    print(f"Error estimating distance for marker {marker_id}: {e}")
+                    distance_text = ""
 
-                realtime_text = f"リアルタイム: サイズ={marker_data['size']}, X={marker_data['x']}, Y={marker_data['y']}{distance_text}"
+                realtime_text = f"リアルタイム: サイズ={marker_data['size']}px, 画像X={marker_data.get('image_x', 0):.0f}px, 画像Y={marker_data.get('image_y', 0):.0f}px{distance_text}"
 
                 # Color coding based on visibility
                 if is_visible:
@@ -1408,8 +1521,6 @@ class TelemetryApp(QMainWindow):
             calib_file = 'marker_calibrations.txt'
             with open(calib_file, 'w') as f:
                 for marker_id, calib in self.marker_calibrations.items():
-                    f.write(f"marker_{marker_id}_offset_x={calib['offset_x']}\n")
-                    f.write(f"marker_{marker_id}_offset_y={calib['offset_y']}\n")
                     f.write(f"marker_{marker_id}_offset_angle={calib['offset_angle']}\n")
             print("Marker calibrations saved")
         except Exception as e:
@@ -1428,7 +1539,7 @@ class TelemetryApp(QMainWindow):
                     if '=' in line:
                         key, value = line.split('=', 1)
 
-                        # Parse marker calibration settings
+                        # Parse marker calibration settings (only angle offset)
                         if key.startswith('marker_') and '_' in key:
                             parts = key.split('_')
                             if len(parts) >= 3:
@@ -1436,7 +1547,7 @@ class TelemetryApp(QMainWindow):
                                 param = '_'.join(parts[2:])
 
                                 if marker_id in self.marker_calibrations:
-                                    if param in ['offset_x', 'offset_y', 'offset_angle']:
+                                    if param == 'offset_angle':
                                         self.marker_calibrations[marker_id][param] = float(value)
                                         # Update UI input field
                                         if marker_id in self.marker_calib_controls:
@@ -1475,12 +1586,12 @@ class TelemetryApp(QMainWindow):
             if marker_id not in self.marker_distance_calibrations:
                 self.marker_distance_calibrations[marker_id] = []
 
-            # Add new calibration point
+            # Add new calibration point (using image coordinates from camera)
             calibration_point = {
                 'distance': distance,
                 'size': marker_size,
-                'x': self.aruco_markers[marker_id]['x'],
-                'y': self.aruco_markers[marker_id]['y']
+                'x': self.aruco_markers[marker_id]['image_x'],  # Image coordinates (pixels)
+                'y': self.aruco_markers[marker_id]['image_y']   # Image coordinates (pixels)
             }
 
             self.marker_distance_calibrations[marker_id].append(calibration_point)
@@ -1504,56 +1615,92 @@ class TelemetryApp(QMainWindow):
             print(f"Error recording marker {marker_id} distance calibration: {e}")
 
     def save_marker_distance_calibrations(self):
-        """Save marker distance calibrations to file"""
+        """Save marker distance calibrations to JSON file"""
         try:
-            calib_file = 'marker_distance_calibrations.txt'
+            calib_file = 'marker_calibrations.json'
             if not hasattr(self, 'marker_distance_calibrations'):
                 return
 
-            with open(calib_file, 'w') as f:
-                for marker_id, calibrations in self.marker_distance_calibrations.items():
-                    for i, calib in enumerate(calibrations):
-                        f.write(f"marker_{marker_id}_point_{i}_distance={calib['distance']}\n")
-                        f.write(f"marker_{marker_id}_point_{i}_size={calib['size']}\n")
-                        f.write(f"marker_{marker_id}_point_{i}_x={calib['x']}\n")
-                        f.write(f"marker_{marker_id}_point_{i}_y={calib['y']}\n")
+            # Prepare data with metadata
+            export_data = {
+                'last_updated': datetime.now().isoformat(),
+                'version': '1.0',
+                'markers': self.marker_distance_calibrations
+            }
 
-            print("Marker distance calibrations saved")
+            with open(calib_file, 'w', encoding='utf-8') as f:
+                json.dump(export_data, f, indent=2, ensure_ascii=False)
+
+            print("Marker distance calibrations saved to JSON")
         except Exception as e:
             print(f"Failed to save marker distance calibrations: {e}")
 
     def load_marker_distance_calibrations(self):
-        """Load marker distance calibrations from file"""
+        """Load marker distance calibrations from JSON file"""
         try:
-            calib_file = 'marker_distance_calibrations.txt'
-            if not os.path.exists(calib_file):
+            calib_file = 'marker_calibrations.json'
+
+            # First try to load from new JSON format
+            if os.path.exists(calib_file):
+                with open(calib_file, 'r', encoding='utf-8') as f:
+                    import_data = json.load(f)
+
+                if 'markers' in import_data:
+                    # Convert string keys to integers for marker IDs
+                    self.marker_distance_calibrations = {}
+                    for marker_id_str, calibrations in import_data['markers'].items():
+                        marker_id = int(marker_id_str)
+                        self.marker_distance_calibrations[marker_id] = calibrations
+
+                    print("Marker distance calibrations loaded from JSON")
+                    return
+                else:
+                    print("Invalid JSON calibration data format")
+
+            # Fallback: try to load from old text format and convert
+            old_calib_file = 'marker_distance_calibrations.txt'
+            if os.path.exists(old_calib_file):
+                print("Loading from old text format and converting to JSON...")
+                self.marker_distance_calibrations = {}
+
+                with open(old_calib_file, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if '=' in line:
+                            key, value = line.split('=', 1)
+
+                            if key.startswith('marker_') and '_point_' in key:
+                                parts = key.split('_')
+                                if len(parts) >= 5:
+                                    marker_id = int(parts[1])
+                                    point_idx = int(parts[3])
+                                    param = parts[4]
+
+                                    if marker_id not in self.marker_distance_calibrations:
+                                        self.marker_distance_calibrations[marker_id] = []
+
+                                    # Ensure we have enough calibration points
+                                    while len(self.marker_distance_calibrations[marker_id]) <= point_idx:
+                                        self.marker_distance_calibrations[marker_id].append({})
+
+                                    self.marker_distance_calibrations[marker_id][point_idx][param] = float(value)
+
+                # Clean up incomplete data and ensure all points have required fields
+                for marker_id in list(self.marker_distance_calibrations.keys()):
+                    valid_points = []
+                    for point in self.marker_distance_calibrations[marker_id]:
+                        if isinstance(point, dict) and all(key in point for key in ['distance', 'size', 'x', 'y']):
+                            valid_points.append(point)
+                    self.marker_distance_calibrations[marker_id] = valid_points
+
+                # Save in new JSON format
+                self.save_marker_distance_calibrations()
+                print("Converted old calibration data to JSON format")
                 return
 
-            self.marker_distance_calibrations = {}
+            # If no calibration files exist
+            print("No calibration data files found")
 
-            with open(calib_file, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if '=' in line:
-                        key, value = line.split('=', 1)
-
-                        if key.startswith('marker_') and '_point_' in key:
-                            parts = key.split('_')
-                            if len(parts) >= 5:
-                                marker_id = int(parts[1])
-                                point_idx = int(parts[3])
-                                param = parts[4]
-
-                                if marker_id not in self.marker_distance_calibrations:
-                                    self.marker_distance_calibrations[marker_id] = []
-
-                                # Ensure we have enough calibration points
-                                while len(self.marker_distance_calibrations[marker_id]) <= point_idx:
-                                    self.marker_distance_calibrations[marker_id].append({})
-
-                                self.marker_distance_calibrations[marker_id][point_idx][param] = float(value)
-
-            print("Marker distance calibrations loaded")
         except Exception as e:
             print(f"Failed to load marker distance calibrations: {e}")
 
@@ -1574,15 +1721,25 @@ class TelemetryApp(QMainWindow):
         if len(calibrations) == 0:
             return None
 
+        # Validate calibration data - filter out invalid entries
+        valid_calibrations = []
+        for calib in calibrations:
+            if isinstance(calib, dict) and 'size' in calib and 'distance' in calib:
+                if calib['size'] > 0 and calib['distance'] > 0:
+                    valid_calibrations.append(calib)
+
+        if len(valid_calibrations) == 0:
+            return None
+
         # Use linear interpolation or the closest calibration point
-        if len(calibrations) == 1:
+        if len(valid_calibrations) == 1:
             # Single point: use simple inverse relationship
-            calib = calibrations[0]
+            calib = valid_calibrations[0]
             estimated_distance = calib['distance'] * calib['size'] / current_size
             return estimated_distance
         else:
             # Multiple points: find the two closest by size
-            calibrations = sorted(calibrations, key=lambda x: x['size'])
+            calibrations = sorted(valid_calibrations, key=lambda x: x['size'])
 
             # Find the best interpolation range
             if current_size <= calibrations[0]['size']:
@@ -1645,63 +1802,66 @@ class TelemetryApp(QMainWindow):
 
         self.calibration_data_display.setText(display_text)
 
-    def export_calibration_data(self):
-        """Export calibration data to JSON file"""
+    def backup_calibration_data(self):
+        """Create a timestamped backup of current calibration data"""
         try:
-            import json
-            from datetime import datetime
-
             if not hasattr(self, 'marker_distance_calibrations'):
-                print("No calibration data to export")
+                print("No calibration data to backup")
                 return
 
-            # Prepare data for export
-            export_data = {
-                'export_time': datetime.now().isoformat(),
+            # Prepare data for backup
+            backup_data = {
+                'backup_time': datetime.now().isoformat(),
+                'version': '1.0',
                 'markers': self.marker_distance_calibrations
             }
 
-            # Save to file with timestamp
+            # Save backup file with timestamp
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f'calibration_export_{timestamp}.json'
+            backup_filename = f'marker_calibrations_backup_{timestamp}.json'
 
-            with open(filename, 'w', encoding='utf-8') as f:
-                json.dump(export_data, f, indent=2, ensure_ascii=False)
+            with open(backup_filename, 'w', encoding='utf-8') as f:
+                json.dump(backup_data, f, indent=2, ensure_ascii=False)
 
-            print(f"Calibration data exported to {filename}")
+            print(f"Calibration data backed up to {backup_filename}")
 
         except Exception as e:
-            print(f"Failed to export calibration data: {e}")
+            print(f"Failed to backup calibration data: {e}")
 
-    def import_calibration_data(self):
-        """Import calibration data from JSON file"""
+    def restore_calibration_data(self):
+        """Restore calibration data from most recent backup"""
         try:
-            import json
             import glob
 
-            # Find the most recent export file
-            export_files = glob.glob('calibration_export_*.json')
-            if not export_files:
-                print("No calibration export files found")
+            # Find the most recent backup file
+            backup_files = glob.glob('marker_calibrations_backup_*.json')
+            if not backup_files:
+                print("No calibration backup files found")
                 return
 
-            # Use the most recent file
-            latest_file = max(export_files)
+            # Use the most recent backup file
+            latest_backup = max(backup_files)
 
-            with open(latest_file, 'r', encoding='utf-8') as f:
-                import_data = json.load(f)
+            with open(latest_backup, 'r', encoding='utf-8') as f:
+                backup_data = json.load(f)
 
             # Load the data
-            if 'markers' in import_data:
-                self.marker_distance_calibrations = import_data['markers']
-                self.save_marker_distance_calibrations()  # Save to regular format too
+            if 'markers' in backup_data:
+                # Convert string keys to integers for marker IDs
+                self.marker_distance_calibrations = {}
+                for marker_id_str, calibrations in backup_data['markers'].items():
+                    marker_id = int(marker_id_str)
+                    self.marker_distance_calibrations[marker_id] = calibrations
+
+                # Save to main calibration file
+                self.save_marker_distance_calibrations()
                 self.update_calibration_graph()
-                print(f"Calibration data imported from {latest_file}")
+                print(f"Calibration data restored from {latest_backup}")
             else:
-                print("Invalid calibration data format")
+                print("Invalid backup data format")
 
         except Exception as e:
-            print(f"Failed to import calibration data: {e}")
+            print(f"Failed to restore calibration data: {e}")
 
     def update_and_save_auto_landing_params(self):
         """Update and save auto landing parameters"""
@@ -1738,8 +1898,13 @@ class TelemetryApp(QMainWindow):
         gains = self.current_pid_gains
         self.roll_pid = PIDController(gains.get('roll_p', 0), gains.get('roll_i', 0), gains.get('roll_d', 0))
         self.pitch_pid = PIDController(gains.get('pitch_p', 0), gains.get('pitch_i', 0), gains.get('pitch_d', 0))
-        # TODO: Make alt PID gains adjustable
-        self.alt_pid = PIDController(Kp=0.1, Ki=0.02, Kd=0.05, output_limits=(-15, 15)) # Output is target pitch angle
+        # Altitude PID gains now adjustable from UI
+        self.alt_pid = PIDController(
+            Kp=gains.get('alt_p', 0.1),
+            Ki=gains.get('alt_i', 0.02),
+            Kd=gains.get('alt_d', 0.05),
+            output_limits=(-15, 15)
+        ) # Output is target pitch angle
         self.yaw_pid = PIDController(gains.get('yaw_p', 0), gains.get('yaw_i', 0), gains.get('yaw_d', 0))
         print("PID controllers initialized/updated.")
 
@@ -1892,34 +2057,36 @@ class TelemetryApp(QMainWindow):
             print(f"自動離着陸パラメータの保存中にエラーが発生しました: {e}")
 
     def estimate_distance_from_markers(self):
-        """Estimate distance using ArUco marker data with 3-point linear interpolation"""
-        valid_markers = []
+        """Estimate distance using ArUco marker data with individual marker calibrations"""
+        valid_estimates = []
 
-        # Check which markers have valid data (size > 0)
+        # Check each marker and get individual distance estimates
         for marker_id, marker_data in self.aruco_markers.items():
-            if marker_data['size'] > 0:
-                valid_markers.append((marker_id, marker_data['size']))
+            if marker_data['size'] > 0:  # Marker is detected
+                try:
+                    # Use individual marker distance estimation
+                    distance_est = self.estimate_distance_from_marker(marker_id)
+                    if distance_est is not None and distance_est > 0:
+                        weight = marker_data['size']  # Larger markers get more weight
+                        valid_estimates.append((distance_est, weight))
+                        print(f"Marker {marker_id}: distance {distance_est:.2f}m, weight {weight}")
+                except Exception as e:
+                    print(f"Error estimating distance for marker {marker_id}: {e}")
+                    continue
 
-        if not valid_markers:
+        if not valid_estimates:
             return 0.0
 
-        # Calculate weighted distance estimates
-        distance_estimates = []
-        total_weight = 0.0
+        # Calculate weighted average distance
+        total_weighted_distance = sum(dist * weight for dist, weight in valid_estimates)
+        total_weight = sum(weight for _, weight in valid_estimates)
 
-        for marker_id, size in valid_markers:
-            distance_est = self.interpolate_distance_from_size(size)
-            if distance_est > 0:
-                weight = size  # Larger markers get more weight
-                distance_estimates.append((distance_est, weight))
-                total_weight += weight
+        if total_weight > 0:
+            weighted_average = total_weighted_distance / total_weight
+            print(f"Distance estimate: {len(valid_estimates)} markers, result: {weighted_average:.2f}m")
+            return weighted_average
 
-        if not distance_estimates:
-            return 0.0
-
-        # Calculate weighted average
-        weighted_distance = sum(dist * weight for dist, weight in distance_estimates) / total_weight
-        return weighted_distance
+        return 0.0
 
     def interpolate_distance_from_size(self, size):
         """Linear interpolation using 3 calibration points"""
@@ -2035,11 +2202,24 @@ class TelemetryApp(QMainWindow):
 
     def update_auto_landing_phase(self):
         """Update auto landing phase based on estimated distance"""
+        distance = self.estimated_distance
+
+        # Always update distance and altitude display regardless of auto-landing status
+        if hasattr(self, 'distance_label'):
+            self.distance_label.setText(f"推定距離: {distance:.1f} m")
+
+        # Update altitude debug info
+        if hasattr(self, 'altitude_debug_label'):
+            current_alt_mm = self.latest_attitude.get('alt', 0)
+            current_alt_m = current_alt_mm / 1000.0
+            self.altitude_debug_label.setText(f"高度: {current_alt_m:.2f} m ({current_alt_mm:.0f} mm)")
+
         if not self.auto_landing_enabled:
             self.auto_landing_phase = 0  # Manual
+            # Update phase display for manual mode
+            if hasattr(self, 'phase_label'):
+                self.phase_label.setText("フェーズ: 手動")
             return
-
-        distance = self.estimated_distance
 
         # Phase transition logic based on distance thresholds
         takeoff_threshold = self.auto_landing_params.get('takeoff_distance_threshold', 30.0)
@@ -2060,18 +2240,10 @@ class TelemetryApp(QMainWindow):
             print(f"Auto landing phase changed from {self.auto_landing_phase} to {new_phase}")
             self.auto_landing_phase = new_phase
 
-        # Update phase display
+        # Update phase display for auto-landing modes
         phase_names = {0: "手動", 1: "離陸", 2: "投下", 3: "定常", 4: "着陸"}
         if hasattr(self, 'phase_label'):
             self.phase_label.setText(f"フェーズ: {phase_names.get(self.auto_landing_phase, '不明')}")
-        if hasattr(self, 'distance_label'):
-            self.distance_label.setText(f"推定距離: {distance:.1f} m")
-
-        # Update altitude debug info
-        if hasattr(self, 'altitude_debug_label'):
-            current_alt_mm = self.latest_attitude.get('alt', 0)
-            current_alt_m = current_alt_mm / 1000.0
-            self.altitude_debug_label.setText(f"高度: {current_alt_m:.2f} m ({current_alt_mm:.0f} mm)")
 
     def run_auto_landing_control(self):
         """Execute auto landing control logic based on current phase"""
@@ -2431,8 +2603,14 @@ class TelemetryApp(QMainWindow):
         try:
             parts = [float(p) for p in line.split(',')]
             if len(parts) == 24:  # 24パラメータに対応
-                # パラメータ1-12: 既存のテレメトリデータ
-                roll, pitch, yaw, alt, ail, elev, thro, rudd, aux1, aux2, aux3, aux4 = parts[0:12]
+                # パラメータ1-4: 姿勢・高度データ
+                roll, pitch, yaw, alt = parts[0:4]
+
+                # パラメータ5-8: プロポ入力データ（送信側順序に対応）
+                ail, elev, thro, rudd = parts[4:8]
+
+                # パラメータ9-12: AUXスイッチ
+                aux1, aux2, aux3, aux4 = parts[8:12]
 
                 # パラメータ13-24: ArUcoマーカー情報
                 aruco1_size, aruco1_id, aruco1_x, aruco1_y = parts[12:16]
@@ -2463,10 +2641,18 @@ class TelemetryApp(QMainWindow):
                 prev_yaw = prev.get('yaw', 0.0)
                 prev_alt = prev.get('alt', 0.0)
 
-                # 姿勢データのフィルタリング（0.0の場合のみ前回値を使用）
-                roll = roll if roll != 0.0 else prev_roll
-                pitch = pitch if pitch != 0.0 else prev_pitch
-                yaw = yaw if yaw != 0.0 else prev_yaw
+                # 姿勢データのフィルタリング（角度エラーの可能性がある場合は前回値を使用）
+                # Pitch: -0.2 < pitch < 0.2 の場合は前回値を使用
+                if -0.2 < pitch < 0.2:
+                    pitch = prev_pitch
+
+                # Roll: -0.2 < roll < 0.2 の場合は前回値を使用
+                if -0.2 < roll < 0.2:
+                    roll = prev_roll
+
+                # Yaw: 359.8 < yaw または yaw < 0.2 の場合は前回値を使用
+                if yaw > 359.8 or yaw < 0.2:
+                    yaw = prev_yaw
 
                 # 高度データの処理（0.0の場合のみ前回値を使用、それ以外は送信データをそのまま使用）
                 if alt != 0.0:
@@ -2939,13 +3125,11 @@ class TelemetryApp(QMainWindow):
             if hasattr(self, 'xy_position_widget'):
                 success = self.xy_position_widget.save_marker_positions()
             if success:
-                self.status_label.setText("マーカー位置を保存しました")
-                print("マーカー位置保存完了")
+                print("マーカー位置を保存しました")
             else:
-                self.status_label.setText("マーカー位置保存に失敗しました")
+                print("マーカー位置保存に失敗しました")
         except Exception as e:
             print(f"マーカー位置保存エラー: {e}")
-            self.status_label.setText(f"保存エラー: {e}")
 
     def load_marker_positions_ui(self):
         """Load marker positions and update UI"""
@@ -2964,11 +3148,9 @@ class TelemetryApp(QMainWindow):
                         controls['y'].setText(f"{marker_pos['y']:.1f}")
                         controls['z'].setText(f"{marker_pos['z']:.1f}")
 
-                self.status_label.setText("マーカー位置を読み込みました")
-                print("マーカー位置読み込み完了")
+                print("マーカー位置を読み込みました")
         except Exception as e:
             print(f"マーカー位置読み込みエラー: {e}")
-            self.status_label.setText(f"読み込みエラー: {e}")
 
     def reset_marker_positions(self):
         """Reset marker positions to default values"""
@@ -2993,11 +3175,9 @@ class TelemetryApp(QMainWindow):
                     controls['y'].setText(f"{pos['y']:.1f}")
                     controls['z'].setText(f"{pos['z']:.1f}")
 
-            self.status_label.setText("マーカー位置をデフォルトにリセットしました")
-            print("マーカー位置リセット完了")
+            print("マーカー位置をデフォルトにリセットしました")
         except Exception as e:
             print(f"マーカー位置リセットエラー: {e}")
-            self.status_label.setText(f"リセットエラー: {e}")
 
     def closeEvent(self, event):
         if self.video_thread and self.video_thread.isRunning():
