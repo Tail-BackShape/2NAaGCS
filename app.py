@@ -246,7 +246,7 @@ class StickWidget(QWidget):
             painter.drawText(QRectF(0, 0, self.width(), 15), Qt.AlignCenter, self._y_label)
             painter.drawText(QRectF(self.width() - 35, 0, 35, self.height()), Qt.AlignCenter, self._x_label)
 
-            # 現在のプロポ入力位置（シアン）
+            # 現在の手動操縦入力位置（シアン）
             center_x = self.width()/2 + self._x * (self.width()/2 - 10)
             center_y = self.height()/2 - self._y * (self.height()/2 - 10)
             painter.setBrush(QColor("cyan"))
@@ -1182,7 +1182,7 @@ class TelemetryApp(QMainWindow):
         # Create Auto Landing tab (new functionality)
         self._create_auto_landing_tab()
 
-        # Create Input Replay tab (propeller input recording/replay system)
+        # Create Input Replay tab (manual piloting recording/replay system)
         self._create_input_replay_tab()
 
     def _create_gcs_tab(self):
@@ -1246,7 +1246,7 @@ class TelemetryApp(QMainWindow):
         self._create_calibration_graph_tab()
 
     def _create_input_replay_tab(self):
-        """Create the Input Replay tab for propeller input recording/replay system"""
+        """Create the Input Replay tab for manual piloting recording/replay system"""
         input_replay_widget = QWidget()
         main_layout = QHBoxLayout(input_replay_widget)
 
@@ -1263,7 +1263,7 @@ class TelemetryApp(QMainWindow):
         main_layout.addWidget(right_panel, 2)  # Increased from 1 to 2 for more graph space
 
         # Add Input Replay tab to tab widget
-        self.tab_widget.addTab(input_replay_widget, "プロポ入力記録・再現")
+        self.tab_widget.addTab(input_replay_widget, "手動操縦記録・再現")
 
     def _create_input_replay_left_panel(self):
         """Create left panel for input replay controls"""
@@ -1271,12 +1271,12 @@ class TelemetryApp(QMainWindow):
         layout = QVBoxLayout(panel)
 
         # Input Log System group
-        log_group = QGroupBox("プロポ入力ログシステム")
+        log_group = QGroupBox("手動操縦ログシステム")
         log_layout = QVBoxLayout(log_group)
 
         # Recording controls
         record_layout = QHBoxLayout()
-        self.record_button = QPushButton("記録開始")
+        self.record_button = QPushButton("操縦記録開始")
         self.record_button.setCheckable(True)
         self.record_button.clicked.connect(self.toggle_input_recording)
 
@@ -1289,8 +1289,8 @@ class TelemetryApp(QMainWindow):
 
         # Load/Save controls
         file_layout = QHBoxLayout()
-        self.save_log_button = QPushButton("ログ保存")
-        self.load_log_button = QPushButton("ログ読み込み")
+        self.save_log_button = QPushButton("操縦ログ保存")
+        self.load_log_button = QPushButton("操縦ログ読み込み")
         self.save_log_button.clicked.connect(self.save_input_log)
         self.load_log_button.clicked.connect(self.load_input_log)
 
@@ -1300,11 +1300,11 @@ class TelemetryApp(QMainWindow):
 
         # Replay controls
         replay_layout = QHBoxLayout()
-        self.replay_button = QPushButton("ログ再現飛行開始")
+        self.replay_button = QPushButton("操縦再現飛行開始")
         self.replay_button.clicked.connect(self.toggle_input_replay)
         self.replay_button.setEnabled(False)  # AUX5が有効な時のみ使用可能
 
-        self.replay_status_label = QLabel("ログ未読み込み")
+        self.replay_status_label = QLabel("操縦ログ未読み込み")
         self.replay_status_label.setStyleSheet("color: #888; font-weight: bold;")
 
         replay_layout.addWidget(self.replay_button)
@@ -1312,7 +1312,7 @@ class TelemetryApp(QMainWindow):
         log_layout.addLayout(replay_layout)
 
         # Log info
-        self.log_info_label = QLabel("記録データ: なし")
+        self.log_info_label = QLabel("操縦記録データ: なし")
         self.log_info_label.setStyleSheet("color: #666; font-size: 10px;")
         log_layout.addWidget(self.log_info_label)
 
@@ -1953,7 +1953,7 @@ class TelemetryApp(QMainWindow):
             self.input_log_start_time = 0
             self.input_log_last_record_time = 0
 
-            self.record_button.setText("記録停止")
+            self.record_button.setText("操縦記録停止")
             self.record_button.setStyleSheet("background-color: #dc3545; color: white;")
             self.record_status_label.setText("記録中...")
             self.record_status_label.setStyleSheet("color: #dc3545; font-weight: bold;")
@@ -1963,7 +1963,7 @@ class TelemetryApp(QMainWindow):
             # Stop recording
             self.input_log_recording = False
 
-            self.record_button.setText("記録開始")
+            self.record_button.setText("操縦記録開始")
             self.record_button.setStyleSheet("")
             self.record_status_label.setText(f"記録完了 ({len(self.input_log_data)}点)")
             self.record_status_label.setStyleSheet("color: #28a745; font-weight: bold;")
@@ -1986,9 +1986,9 @@ class TelemetryApp(QMainWindow):
             print("警告: 無効なログ間隔の値です")
 
     def save_input_log(self):
-        """Save recorded input log to file"""
+        """Save recorded manual piloting flight state log to file"""
         if not self.input_log_data:
-            print("保存するログデータがありません")
+            print("保存する手動操縦ログデータがありません")
             return
 
         try:
@@ -1998,51 +1998,49 @@ class TelemetryApp(QMainWindow):
 
             # Generate filename with timestamp
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"logs/input_log_{timestamp}.json"
+            filename = f"logs/manual_piloting_log_{timestamp}.json"
 
-            # Prepare log data
-            log_data = {
-                'timestamp': datetime.now().isoformat(),
-                'duration': self.input_log_data[-1]['timestamp'] if self.input_log_data else 0,
-                'data_points': len(self.input_log_data),
-                'interval': self.input_log_interval,  # 記録間隔を保存
-                'data': self.input_log_data
-            }
-
-            # Save to file
+            # Save flight state data directly as array (same format as auto landing log)
             with open(filename, 'w', encoding='utf-8') as f:
-                json.dump(log_data, f, indent=2, ensure_ascii=False)
+                json.dump(self.input_log_data, f, indent=2, ensure_ascii=False)
 
-            print(f"ログを保存しました: {filename}")
+            duration = self.input_log_data[-1]['elapsed_time'] if self.input_log_data else 0
+            print(f"手動操縦ログを保存しました: {filename} ({len(self.input_log_data)}点, {duration:.1f}秒)")
 
         except Exception as e:
-            print(f"ログ保存エラー: {e}")
+            print(f"手動操縦ログ保存エラー: {e}")
 
     def load_input_log(self):
-        """Load input log from file"""
+        """Load manual piloting flight state log from file"""
         try:
-            # Find the most recent log file
-            log_files = glob.glob('logs/input_log_*.json')
+            # Find the most recent manual piloting log file
+            log_files = glob.glob('logs/manual_piloting_log_*.json')
             if not log_files:
-                print("ログファイルが見つかりません")
-                self.replay_status_label.setText("ログファイルなし")
+                print("手動操縦ログファイルが見つかりません")
+                self.replay_status_label.setText("手動操縦ログファイルなし")
                 return
 
             # Load the most recent file
             latest_file = max(log_files, key=os.path.getctime)
 
             with open(latest_file, 'r', encoding='utf-8') as f:
-                log_data = json.load(f)
+                self.loaded_input_log = json.load(f)
 
-            self.loaded_input_log = log_data['data']
-            duration = log_data.get('duration', 0)
-            data_points = log_data.get('data_points', len(self.loaded_input_log))
-            loaded_interval = log_data.get('interval', 0.1)  # デフォルト0.1秒
+            # Calculate duration and interval from flight state data
+            if self.loaded_input_log:
+                duration = self.loaded_input_log[-1]['elapsed_time']
+                data_points = len(self.loaded_input_log)
+                # Calculate average interval from elapsed time
+                loaded_interval = duration / max(1, data_points - 1) if data_points > 1 else 0.1
+            else:
+                duration = 0
+                data_points = 0
+                loaded_interval = 0.1
 
             # 読み込んだログの間隔を表示用に記録（現在の設定は変更しない）
             self.loaded_log_interval = loaded_interval
 
-            self.replay_status_label.setText(f"ログ読み込み完了 ({data_points}点)")
+            self.replay_status_label.setText(f"手動操縦ログ読み込み完了 ({data_points}点)")
             self.replay_status_label.setStyleSheet("color: #28a745; font-weight: bold;")
 
             # Update loaded log info in input replay tab
@@ -2080,7 +2078,7 @@ class TelemetryApp(QMainWindow):
             # Start mission mode 4 for input replay
             self.start_mission(4)
 
-            self.replay_button.setText("再現停止")
+            self.replay_button.setText("操縦再現停止")
             self.replay_button.setStyleSheet("background-color: #dc3545; color: white;")
             self.replay_status_label.setText("再現中...")
             self.replay_status_label.setStyleSheet("color: #dc3545; font-weight: bold;")
@@ -2107,7 +2105,7 @@ class TelemetryApp(QMainWindow):
 
             self.replay_button.setText("ログ再現飛行開始")
             self.replay_button.setStyleSheet("")
-            self.replay_status_label.setText("再現停止")
+            self.replay_status_label.setText("操縦再現停止")
             self.replay_status_label.setStyleSheet("color: #6c757d; font-weight: bold;")
 
             print("ログ再現飛行を手動停止しました (ミッション停止)")
@@ -3505,39 +3503,41 @@ class TelemetryApp(QMainWindow):
                 if len(parts) > 8:
                     self.current_aux1 = float(parts[8])
 
-                # Handle input log replay - must be before regular processing
+                # Handle manual piloting flight state replay - must be before regular processing
                 if self.input_log_replaying and self.loaded_input_log:
                     current_time = time.time() - self.input_log_replay_start_time
 
                     # Find the current data point to apply (設定間隔データの適用)
                     current_data = None
                     for i, data in enumerate(self.loaded_input_log):
-                        if data['timestamp'] <= current_time:
+                        if data['elapsed_time'] <= current_time:
                             current_data = data
                             self.input_log_replay_index = i + 1
                         else:
                             break
 
-                    # Apply current replay data if available
+                    # Apply current replay data if available - send target flight state instead of propeller inputs
                     if current_data:
-                        # ログ再現飛行では操縦量を加工せずに直接シリアル送信
-                        replay_commands = {
-                            'ail': float(current_data['ail']),    # Aileron
-                            'elev': float(current_data['elev']),  # Elevator
-                            'thro': float(current_data['thro']),  # Throttle
-                            'rudd': float(current_data['rudd'])   # Rudder
-                        }
+                        # 手動操縦ログ再現では飛行状態目標値を設定（自動制御で達成）
+                        target_altitude = float(current_data['altitude'])
+                        target_yaw = float(current_data['yaw'])
+                        target_throttle = float(current_data['throttle'])
+                        target_aux1 = float(current_data['aux1'])
 
-                        # 保存されたデータをそのまま送信
-                        self.send_serial_command(replay_commands)
+                        # Set flight state targets for auto landing system
+                        self.target_altitude = target_altitude
+                        self.target_yaw_angle = target_yaw
 
-                        # Apply AUX1 if available in replay data
-                        if 'aux1' in current_data and len(parts) > 8:
-                            parts[8] = float(current_data['aux1'])  # AUX1
+                        # Override throttle and AUX1 directly
+                        if len(parts) > 8:
+                            parts[8] = str(int(target_aux1))  # AUX1
+
+                        # Use auto landing control system to achieve targets
+                        # The control commands will be calculated automatically
 
                         # デバッグ出力は設定間隔ごと（データが更新された時のみ）
                         if not hasattr(self, '_last_replay_data') or self._last_replay_data != current_data:
-                            print(f"Replay Direct Send: A:{replay_commands['ail']:.0f}, E:{replay_commands['elev']:.0f}, T:{replay_commands['thro']:.0f}, R:{replay_commands['rudd']:.0f}, AUX1:{current_data.get('aux1', 'N/A')}, Time:{current_time:.1f}s, Interval:{self.input_log_interval}s")
+                            print(f"Manual Piloting Replay: Target Alt:{target_altitude:.1f}mm, Yaw:{target_yaw:.1f}°, Throttle:{target_throttle}, AUX1:{target_aux1}, Time:{current_time:.1f}s")
                             self._last_replay_data = current_data
 
                         # ログ再現飛行中は直接送信したので、後続の処理をスキップ
@@ -3545,7 +3545,7 @@ class TelemetryApp(QMainWindow):
 
                     # Check if replay is complete (time-based)
                     if (self.loaded_input_log and
-                        current_time >= self.loaded_input_log[-1]['timestamp']):
+                        current_time >= self.loaded_input_log[-1]['elapsed_time']):
                         self.input_log_replaying = False
 
                         # Stop mission when replay is complete
@@ -3568,7 +3568,7 @@ class TelemetryApp(QMainWindow):
                         self.replay_status_label.setStyleSheet("color: #28a745; font-weight: bold;")
                         print("ログ再現飛行が完了しました (ミッション停止)")
 
-                # プロポ入力ログ記録（設定可能間隔）
+                # 手動操縦ログ記録（飛行状態データ記録、設定可能間隔）
                 if self.input_log_recording:
                     current_time = time.time()
                     if self.input_log_start_time == 0:
@@ -3577,14 +3577,14 @@ class TelemetryApp(QMainWindow):
 
                     # 設定した間隔経過した場合のみ記録
                     if current_time - self.input_log_last_record_time >= self.input_log_interval:
-                        timestamp = current_time - self.input_log_start_time
+                        elapsed_time = current_time - self.input_log_start_time
                         log_entry = {
-                            'timestamp': timestamp,
-                            'ail': ail,
-                            'elev': elev,
-                            'thro': thro,
-                            'rudd': rudd,
-                            'aux1': parts[8] if len(parts) > 8 else '1000'
+                            'timestamp': current_time,
+                            'elapsed_time': elapsed_time,
+                            'altitude': self.altitude,
+                            'yaw': self.yaw_angle,
+                            'throttle': int(thro),
+                            'aux1': int(parts[8]) if len(parts) > 8 else 1000
                         }
                         self.input_log_data.append(log_entry)
                         self.input_log_last_record_time = current_time
