@@ -16,7 +16,7 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGroupBox, QFormLayout, QComboBox, QPushButton, QLabel, QGridLayout, QLineEdit, QCheckBox,
-    QTabWidget
+    QTabWidget, QDoubleSpinBox, QFileDialog
 )
 from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QPolygonF, QImage, QPixmap, QTransform, QLinearGradient
@@ -904,11 +904,35 @@ class TelemetryApp(QMainWindow):
         self.input_log_recording = False
         self.input_log_data = []  # {'timestamp': time, 'ail': val, 'elev': val, 'thro': val, 'rudd': val}
         self.input_log_start_time = 0
-        self.input_log_last_record_time = 0  # 最後に記録した時刻（0.1秒間隔制御用）
+        self.input_log_last_record_time = 0  # 最後に記録した時刻（間隔制御用）
         self.input_log_replaying = False
         self.input_log_replay_start_time = 0
         self.input_log_replay_index = 0
         self.loaded_input_log = []
+        self.input_log_interval = 0.1  # 記録・再現間隔（秒）- 調整可能
+
+        # --- Auto Landing Log System ---
+        self.auto_landing_log_recording = False
+        self.auto_landing_log_data = []  # {'timestamp': time, 'altitude': val, 'yaw': val, 'throttle': val, 'aux1': val}
+        self.auto_landing_log_start_time = 0
+        self.auto_landing_log_last_record_time = 0
+        self.auto_landing_log_replaying = False
+        self.auto_landing_log_replay_start_time = 0
+        self.auto_landing_log_replay_index = 0
+        self.loaded_auto_landing_log = []
+        self.auto_landing_log_interval = 0.1  # 自動離着陸ログ間隔（秒）
+
+        # --- Current Flight State Values (Auto Landing Log Data) ---
+        self.current_altitude = 0.0      # 高度 (mm)
+        self.current_yaw = 0.0           # ヨー角 (度)
+        self.current_throttle = 0.0      # スロットル量
+        self.current_aux1 = 0.0          # 物資投下タイミング (AUX1)
+
+        # --- Legacy Propeller Input Values (for compatibility) ---
+        self.current_ail = 1500
+        self.current_elev = 1500
+        self.current_thro = 1000
+        self.current_rudd = 1500
 
         # --- Auto Landing State ---
         self.auto_landing_enabled = False
@@ -1158,6 +1182,27 @@ class TelemetryApp(QMainWindow):
 
         layout.addWidget(log_group)
 
+        # Settings group
+        settings_group = QGroupBox("記録・再現設定")
+        settings_layout = QFormLayout(settings_group)
+
+        # Log interval setting
+        self.log_interval_input = QLineEdit("0.1")
+        self.log_interval_input.setMaximumWidth(80)
+        self.log_interval_input.textChanged.connect(self.update_log_interval)
+        interval_layout = QHBoxLayout()
+        interval_layout.addWidget(self.log_interval_input)
+        interval_layout.addWidget(QLabel("秒"))
+        interval_layout.addStretch()
+        settings_layout.addRow("記録・再現間隔:", interval_layout)
+
+        # Interval info
+        interval_info = QLabel("※ 0.05-1.0秒の範囲で設定してください")
+        interval_info.setStyleSheet("color: #666; font-size: 10px;")
+        settings_layout.addWidget(interval_info)
+
+        layout.addWidget(settings_group)
+
         # AUX5 Status group
         aux5_group = QGroupBox("AUX5状態 (自動離着陸スイッチ)")
         aux5_layout = QVBoxLayout(aux5_group)
@@ -1184,23 +1229,20 @@ class TelemetryApp(QMainWindow):
         input_group = QGroupBox("現在のプロポ入力値")
         input_layout = QGridLayout(input_group)
 
-        # Create labels for current input values
-        self.current_ail_label = QLabel("エルロン: ---")
-        self.current_elev_label = QLabel("エレベーター: ---")
-        self.current_thro_label = QLabel("スロットル: ---")
-        self.current_rudd_label = QLabel("ラダー: ---")
-        self.current_aux1_label = QLabel("AUX1: ---")
+        # Create labels for current flight state values
+        self.current_altitude_label = QLabel("高度: ---")
+        self.current_yaw_label = QLabel("ヨー角: ---")
+        self.current_throttle_label = QLabel("スロットル: ---")
+        self.current_aux1_label = QLabel("物資投下: ---")
 
-        input_layout.addWidget(QLabel("AIL:"), 0, 0)
-        input_layout.addWidget(self.current_ail_label, 0, 1)
-        input_layout.addWidget(QLabel("ELEV:"), 1, 0)
-        input_layout.addWidget(self.current_elev_label, 1, 1)
-        input_layout.addWidget(QLabel("THRO:"), 2, 0)
-        input_layout.addWidget(self.current_thro_label, 2, 1)
-        input_layout.addWidget(QLabel("RUDD:"), 3, 0)
-        input_layout.addWidget(self.current_rudd_label, 3, 1)
-        input_layout.addWidget(QLabel("AUX1:"), 4, 0)
-        input_layout.addWidget(self.current_aux1_label, 4, 1)
+        input_layout.addWidget(QLabel("高度(mm):"), 0, 0)
+        input_layout.addWidget(self.current_altitude_label, 0, 1)
+        input_layout.addWidget(QLabel("ヨー角(°):"), 1, 0)
+        input_layout.addWidget(self.current_yaw_label, 1, 1)
+        input_layout.addWidget(QLabel("スロットル:"), 2, 0)
+        input_layout.addWidget(self.current_throttle_label, 2, 1)
+        input_layout.addWidget(QLabel("AUX1:"), 3, 0)
+        input_layout.addWidget(self.current_aux1_label, 3, 1)
 
         layout.addWidget(input_group)
 
@@ -1233,10 +1275,12 @@ class TelemetryApp(QMainWindow):
         self.loaded_log_info_label = QLabel("ログ未読み込み")
         self.loaded_log_duration_label = QLabel("継続時間: ---")
         self.loaded_log_points_label = QLabel("データ点数: ---")
+        self.loaded_log_interval_label = QLabel("記録間隔: ---")
 
         log_info_layout.addWidget(self.loaded_log_info_label)
         log_info_layout.addWidget(self.loaded_log_duration_label)
         log_info_layout.addWidget(self.loaded_log_points_label)
+        log_info_layout.addWidget(self.loaded_log_interval_label)
 
         layout.addWidget(log_info_group)
 
@@ -1324,6 +1368,62 @@ class TelemetryApp(QMainWindow):
 
         layout.addWidget(params_group)
 
+        # Auto Landing Log System Control
+        log_group = QGroupBox("飛行状態ログシステム")
+        log_layout = QVBoxLayout(log_group)
+
+        # Recording controls
+        record_layout = QHBoxLayout()
+        self.auto_landing_log_record_button = QPushButton("飛行状態記録開始")
+        self.auto_landing_log_record_button.setStyleSheet("background-color: #28a745; color: white;")
+        self.auto_landing_log_record_button.clicked.connect(self.toggle_auto_landing_log_recording)
+        self.auto_landing_log_stop_record_button = QPushButton("記録停止")
+        self.auto_landing_log_stop_record_button.setStyleSheet("background-color: #dc3545; color: white;")
+        self.auto_landing_log_stop_record_button.clicked.connect(self.stop_auto_landing_log_recording)
+        self.auto_landing_log_stop_record_button.setEnabled(False)
+
+        record_layout.addWidget(self.auto_landing_log_record_button)
+        record_layout.addWidget(self.auto_landing_log_stop_record_button)
+
+        # Replay controls
+        replay_layout = QHBoxLayout()
+        self.auto_landing_log_load_button = QPushButton("ログファイル読み込み")
+        self.auto_landing_log_load_button.clicked.connect(self.load_auto_landing_log)
+        self.auto_landing_log_replay_button = QPushButton("ログ再現飛行開始")
+        self.auto_landing_log_replay_button.setStyleSheet("background-color: #007bff; color: white;")
+        self.auto_landing_log_replay_button.clicked.connect(self.start_auto_landing_log_replay)
+        self.auto_landing_log_replay_button.setEnabled(False)
+        self.auto_landing_log_stop_replay_button = QPushButton("再現停止")
+        self.auto_landing_log_stop_replay_button.setStyleSheet("background-color: #dc3545; color: white;")
+        self.auto_landing_log_stop_replay_button.clicked.connect(self.stop_auto_landing_log_replay)
+        self.auto_landing_log_stop_replay_button.setEnabled(False)
+
+        replay_layout.addWidget(self.auto_landing_log_load_button)
+        replay_layout.addWidget(self.auto_landing_log_replay_button)
+        replay_layout.addWidget(self.auto_landing_log_stop_replay_button)
+
+        # Status display
+        self.auto_landing_log_status_label = QLabel("状態: 待機中")
+        self.auto_landing_log_status_label.setStyleSheet("font-weight: bold; color: #666;")
+
+        # Interval setting
+        interval_layout = QHBoxLayout()
+        interval_label = QLabel("記録間隔:")
+        self.auto_landing_log_interval_input = QDoubleSpinBox()
+        self.auto_landing_log_interval_input.setRange(0.05, 1.0)
+        self.auto_landing_log_interval_input.setSingleStep(0.01)
+        self.auto_landing_log_interval_input.setValue(0.1)
+        self.auto_landing_log_interval_input.setSuffix(" 秒")
+        self.auto_landing_log_interval_input.valueChanged.connect(self.update_auto_landing_log_interval)
+        interval_layout.addWidget(interval_label)
+        interval_layout.addWidget(self.auto_landing_log_interval_input)
+
+        log_layout.addLayout(record_layout)
+        log_layout.addLayout(replay_layout)
+        log_layout.addWidget(self.auto_landing_log_status_label)
+        log_layout.addLayout(interval_layout)
+
+        layout.addWidget(log_group)
 
         layout.addStretch()
 
@@ -1578,33 +1678,7 @@ class TelemetryApp(QMainWindow):
         self.autopilot_timer.timeout.connect(self.run_autopilot_cycle)
         self.autopilot_timer.start(50) # 20 Hz
 
-        # Auto landing timer
-        self.auto_landing_timer = QTimer(self)
-        self.auto_landing_timer.timeout.connect(self.auto_landing_update_cycle)
-        self.auto_landing_timer.start(100) # 10 Hz
 
-    def auto_landing_update_cycle(self):
-        """Auto landing update cycle - runs at 10Hz"""
-        if self.is_connected:
-            # Calculate position and distance
-            self.calculate_aircraft_position()
-
-            # Update phase based on distance
-            self.update_auto_landing_phase()
-
-            # Run control logic
-            self.run_auto_landing_control()
-
-            # Update auto landing attitude displays
-            if hasattr(self, 'auto_pitch_widget') and hasattr(self, 'auto_yaw_widget'):
-                roll = self.latest_attitude.get('roll', 0)
-                pitch = self.latest_attitude.get('pitch', 0)
-                yaw = self.latest_attitude.get('yaw', 0)
-
-                self.auto_pitch_widget.set_angle(pitch)
-                self.auto_yaw_widget.set_angle(yaw)
-                self.auto_pitch_widget.set_autopilot_active(self.auto_landing_enabled)
-                self.auto_yaw_widget.set_autopilot_active(self.auto_landing_enabled)
 
     def toggle_auto_landing(self):
         """Toggle auto landing enable/disable"""
@@ -1750,9 +1824,21 @@ class TelemetryApp(QMainWindow):
             self.record_status_label.setStyleSheet("color: #28a745; font-weight: bold;")
 
             duration = self.input_log_data[-1]['timestamp'] if self.input_log_data else 0
-            self.log_info_label.setText(f"記録データ: {len(self.input_log_data)}点, {duration:.1f}秒")
+            self.log_info_label.setText(f"記録データ: {len(self.input_log_data)}点, {duration:.1f}秒, 間隔:{self.input_log_interval:.3f}秒")
 
-            print(f"プロポ入力記録を停止しました ({len(self.input_log_data)}点, {duration:.1f}秒)")
+            print(f"プロポ入力記録を停止しました ({len(self.input_log_data)}点, {duration:.1f}秒, 間隔:{self.input_log_interval:.3f}秒)")
+
+    def update_log_interval(self):
+        """Update log recording/replay interval"""
+        try:
+            interval = float(self.log_interval_input.text())
+            if 0.05 <= interval <= 1.0:
+                self.input_log_interval = interval
+                print(f"ログ間隔を{interval}秒に設定しました")
+            else:
+                print(f"警告: ログ間隔は0.05-1.0秒の範囲で設定してください (現在値: {interval})")
+        except (ValueError, AttributeError):
+            print("警告: 無効なログ間隔の値です")
 
     def save_input_log(self):
         """Save recorded input log to file"""
@@ -1774,6 +1860,7 @@ class TelemetryApp(QMainWindow):
                 'timestamp': datetime.now().isoformat(),
                 'duration': self.input_log_data[-1]['timestamp'] if self.input_log_data else 0,
                 'data_points': len(self.input_log_data),
+                'interval': self.input_log_interval,  # 記録間隔を保存
                 'data': self.input_log_data
             }
 
@@ -1805,6 +1892,10 @@ class TelemetryApp(QMainWindow):
             self.loaded_input_log = log_data['data']
             duration = log_data.get('duration', 0)
             data_points = log_data.get('data_points', len(self.loaded_input_log))
+            loaded_interval = log_data.get('interval', 0.1)  # デフォルト0.1秒
+
+            # 読み込んだログの間隔を表示用に記録（現在の設定は変更しない）
+            self.loaded_log_interval = loaded_interval
 
             self.replay_status_label.setText(f"ログ読み込み完了 ({data_points}点)")
             self.replay_status_label.setStyleSheet("color: #28a745; font-weight: bold;")
@@ -1814,11 +1905,12 @@ class TelemetryApp(QMainWindow):
                 self.loaded_log_info_label.setText(f"ファイル: {os.path.basename(latest_file)}")
                 self.loaded_log_duration_label.setText(f"継続時間: {duration:.1f}秒")
                 self.loaded_log_points_label.setText(f"データ点数: {data_points}点")
+                self.loaded_log_interval_label.setText(f"記録間隔: {loaded_interval:.3f}秒")
 
             # Update replay button state based on AUX5
             self.update_replay_button_state()
 
-            print(f"ログを読み込みました: {latest_file} ({data_points}点, {duration:.1f}秒)")
+            print(f"ログを読み込みました: {latest_file} ({data_points}点, {duration:.1f}秒, 間隔:{loaded_interval:.3f}秒)")
 
         except Exception as e:
             print(f"ログ読み込みエラー: {e}")
@@ -1856,6 +1948,18 @@ class TelemetryApp(QMainWindow):
             # Stop mission when replay is stopped
             self.stop_mission()
 
+            # 即座にミッションモード0（手動）を送信
+            if self.is_connected and hasattr(self, 'latest_attitude'):
+                # 現在のプロポ入力値を取得して手動コマンドとして送信
+                current_commands = {
+                    'ail': getattr(self, 'current_ail', 1500),
+                    'elev': getattr(self, 'current_elev', 1500),
+                    'thro': getattr(self, 'current_thro', 1000),
+                    'rudd': getattr(self, 'current_rudd', 1500)
+                }
+                self.send_serial_command(current_commands)
+                print("ミッションモード0（手動）に即座に切り替えました")
+
             self.replay_button.setText("ログ再現飛行開始")
             self.replay_button.setStyleSheet("")
             self.replay_status_label.setText("再現停止")
@@ -1883,35 +1987,33 @@ class TelemetryApp(QMainWindow):
 
     def update_input_replay_displays(self, ail, elev, thro, rudd, aux1):
         """Update real-time displays in input replay tab"""
-        # Update current input values
-        if hasattr(self, 'current_ail_label'):
-            self.current_ail_label.setText(f"エルロン: {ail}")
-            self.current_elev_label.setText(f"エレベーター: {elev}")
-            self.current_thro_label.setText(f"スロットル: {thro}")
-            self.current_rudd_label.setText(f"ラダー: {rudd}")
-            self.current_aux1_label.setText(f"AUX1: {aux1}")
+        # Update current flight state values
+        if hasattr(self, 'current_altitude_label'):
+            self.current_altitude_label.setText(f"高度: {self.current_altitude:.1f}mm")
+            self.current_yaw_label.setText(f"ヨー角: {self.current_yaw:.1f}°")
+            self.current_throttle_label.setText(f"スロットル: {self.current_throttle:.0f}")
+            self.current_aux1_label.setText(f"物資投下: {self.current_aux1:.0f}")
 
-        # Update recording progress if recording
-        if self.input_log_recording and hasattr(self, 'recording_time_label'):
+        # Update auto landing log recording progress if recording
+        if self.auto_landing_log_recording and hasattr(self, 'auto_landing_log_status_label'):
             current_time = time.time()
-            if self.input_log_start_time > 0:
-                recording_time = current_time - self.input_log_start_time
-                recording_points = len(self.input_log_data)
+            if self.auto_landing_log_start_time > 0:
+                recording_time = current_time - self.auto_landing_log_start_time
+                recording_points = len(self.auto_landing_log_data)
                 recording_rate = recording_points / recording_time if recording_time > 0 else 0
 
-                self.recording_time_label.setText(f"記録時間: {recording_time:.1f}秒")
-                self.recording_points_label.setText(f"記録点数: {recording_points}点")
-                self.recording_rate_label.setText(f"記録レート: {recording_rate:.1f}Hz")
+                status_text = f"記録中: {recording_time:.1f}秒, {recording_points}点, {recording_rate:.1f}Hz"
+                self.auto_landing_log_status_label.setText(status_text)
 
-        # Update replay progress if replaying
-        if self.input_log_replaying and hasattr(self, 'replay_time_label'):
-            current_time = time.time() - self.input_log_replay_start_time
-            total_duration = self.loaded_input_log[-1]['timestamp'] if self.loaded_input_log else 0
+        # Update auto landing log replay progress if replaying
+        if self.auto_landing_log_replaying and hasattr(self, 'auto_landing_log_status_label'):
+            current_time = time.time() - self.auto_landing_log_replay_start_time
+            total_duration = self.loaded_auto_landing_log[-1]['elapsed_time'] if self.loaded_auto_landing_log else 0
             progress_percent = (current_time / total_duration * 100) if total_duration > 0 else 0
             progress_percent = min(100, progress_percent)
 
-            self.replay_time_label.setText(f"再現時間: {current_time:.1f}秒")
-            self.replay_progress_label.setText(f"進行率: {progress_percent:.1f}%")
+            status_text = f"再現中: {current_time:.1f}秒, 進行率: {progress_percent:.1f}%"
+            self.auto_landing_log_status_label.setText(status_text)
 
             # Show current replay values if available
             if self.input_log_replay_index < len(self.loaded_input_log):
@@ -2867,6 +2969,12 @@ class TelemetryApp(QMainWindow):
         if not self.auto_landing_enabled or not self.is_connected:
             return
 
+        # Calculate position and distance
+        self.calculate_aircraft_position()
+
+        # Update phase based on distance
+        self.update_auto_landing_phase()
+
         raw_alt = self.latest_attitude.get('alt', 0)
         current_roll = self.latest_attitude.get('roll', 0)
         corrected_alt = self.get_corrected_altitude(raw_alt, current_roll)
@@ -2968,6 +3076,17 @@ class TelemetryApp(QMainWindow):
             self.auto_left_stick_label.setText(f"R: {rudder_rc}, E: {elevator_rc}")
         if hasattr(self, 'auto_right_stick_label'):
             self.auto_right_stick_label.setText(f"A: {aileron_rc}, T: {throttle_rc}")
+
+        # Update auto landing attitude displays
+        if hasattr(self, 'auto_pitch_widget') and hasattr(self, 'auto_yaw_widget'):
+            roll = self.latest_attitude.get('roll', 0)
+            pitch = self.latest_attitude.get('pitch', 0)
+            yaw = self.latest_attitude.get('yaw', 0)
+
+            self.auto_pitch_widget.set_angle(pitch)
+            self.auto_yaw_widget.set_angle(yaw)
+            self.auto_pitch_widget.set_autopilot_active(self.auto_landing_enabled)
+            self.auto_yaw_widget.set_autopilot_active(self.auto_landing_enabled)
 
     def _create_connection_group(self):
         group = QGroupBox("シリアル接続")
@@ -3233,11 +3352,19 @@ class TelemetryApp(QMainWindow):
                 # パラメータ5-8: プロポ入力データ（送信側順序に対応）
                 ail, elev, thro, rudd = parts[4:8]
 
+                # 現在のプロポ入力値を保存（停止時の手動復帰用）
+                self.current_ail = float(ail)
+                self.current_elev = float(elev)
+                self.current_thro = float(thro)
+                self.current_rudd = float(rudd)
+                if len(parts) > 8:
+                    self.current_aux1 = float(parts[8])
+
                 # Handle input log replay - must be before regular processing
                 if self.input_log_replaying and self.loaded_input_log:
                     current_time = time.time() - self.input_log_replay_start_time
 
-                    # Find the current data point to apply (0.1秒間隔データの適用)
+                    # Find the current data point to apply (設定間隔データの適用)
                     current_data = None
                     for i, data in enumerate(self.loaded_input_log):
                         if data['timestamp'] <= current_time:
@@ -3248,20 +3375,28 @@ class TelemetryApp(QMainWindow):
 
                     # Apply current replay data if available
                     if current_data:
-                        # Apply replay input data (replace parsed RC input values)
-                        ail = float(current_data['ail'])    # Aileron
-                        elev = float(current_data['elev'])  # Elevator
-                        thro = float(current_data['thro'])  # Throttle
-                        rudd = float(current_data['rudd'])  # Rudder
+                        # ログ再現飛行では操縦量を加工せずに直接シリアル送信
+                        replay_commands = {
+                            'ail': float(current_data['ail']),    # Aileron
+                            'elev': float(current_data['elev']),  # Elevator
+                            'thro': float(current_data['thro']),  # Throttle
+                            'rudd': float(current_data['rudd'])   # Rudder
+                        }
+
+                        # 保存されたデータをそのまま送信
+                        self.send_serial_command(replay_commands)
 
                         # Apply AUX1 if available in replay data
                         if 'aux1' in current_data and len(parts) > 8:
                             parts[8] = float(current_data['aux1'])  # AUX1
 
-                        # デバッグ出力は0.1秒ごと（データが更新された時のみ）
+                        # デバッグ出力は設定間隔ごと（データが更新された時のみ）
                         if not hasattr(self, '_last_replay_data') or self._last_replay_data != current_data:
-                            print(f"Replay: A:{ail:.0f}, E:{elev:.0f}, T:{thro:.0f}, R:{rudd:.0f}, AUX1:{current_data.get('aux1', 'N/A')}, Time:{current_time:.1f}s")
+                            print(f"Replay Direct Send: A:{replay_commands['ail']:.0f}, E:{replay_commands['elev']:.0f}, T:{replay_commands['thro']:.0f}, R:{replay_commands['rudd']:.0f}, AUX1:{current_data.get('aux1', 'N/A')}, Time:{current_time:.1f}s, Interval:{self.input_log_interval}s")
                             self._last_replay_data = current_data
+
+                        # ログ再現飛行中は直接送信したので、後続の処理をスキップ
+                        return
 
                     # Check if replay is complete (time-based)
                     if (self.loaded_input_log and
@@ -3271,21 +3406,32 @@ class TelemetryApp(QMainWindow):
                         # Stop mission when replay is complete
                         self.stop_mission()
 
+                        # 即座にミッションモード0（手動）を送信
+                        if self.is_connected:
+                            current_commands = {
+                                'ail': self.current_ail,
+                                'elev': self.current_elev,
+                                'thro': self.current_thro,
+                                'rudd': self.current_rudd
+                            }
+                            self.send_serial_command(current_commands)
+                            print("ミッションモード0（手動）に即座に切り替えました")
+
                         self.replay_button.setText("ログ再現飛行開始")
                         self.replay_button.setStyleSheet("")
                         self.replay_status_label.setText("再現完了")
                         self.replay_status_label.setStyleSheet("color: #28a745; font-weight: bold;")
                         print("ログ再現飛行が完了しました (ミッション停止)")
 
-                # プロポ入力ログ記録（0.1秒間隔）
+                # プロポ入力ログ記録（設定可能間隔）
                 if self.input_log_recording:
                     current_time = time.time()
                     if self.input_log_start_time == 0:
                         self.input_log_start_time = current_time
                         self.input_log_last_record_time = current_time
 
-                    # 0.1秒経過した場合のみ記録
-                    if current_time - self.input_log_last_record_time >= 0.1:
+                    # 設定した間隔経過した場合のみ記録
+                    if current_time - self.input_log_last_record_time >= self.input_log_interval:
                         timestamp = current_time - self.input_log_start_time
                         log_entry = {
                             'timestamp': timestamp,
@@ -3361,6 +3507,12 @@ class TelemetryApp(QMainWindow):
                 self.heading_label.setText(f"方位: {yaw:.1f} °")
                 self.update_aux_switches([aux1, aux2, aux3, aux4, aux5])
 
+                # Store current flight state data for auto landing log
+                self.current_altitude = filtered_alt
+                self.current_yaw = yaw
+                self.current_throttle = thro
+                self.current_aux1 = aux1
+
                 # Update input replay tab displays
                 self.update_input_replay_displays(ail, elev, thro, rudd, aux1)
 
@@ -3434,6 +3586,21 @@ class TelemetryApp(QMainWindow):
                 print("AUX5により自動離着陸が有効化されました")
                 # Update replay button state when AUX5 is enabled
                 self.update_replay_button_state()
+
+            # 自動離着陸が有効な場合のミッションモード制御
+            # 操縦量記録中は手動（ミッションモード0）、再現飛行中のみミッションモード4
+            if self.input_log_replaying or self.auto_landing_log_replaying:
+                # 再現飛行中はミッションモード4
+                if not self.autopilot_active or self.active_mission_mode != 4:
+                    self.start_mission(4)  # 再現飛行用ミッションモード4を開始
+            else:
+                # 操縦量記録中または通常の自動離着陸時は手動（ミッションモード0）
+                if self.autopilot_active and self.active_mission_mode != 0:
+                    self.stop_mission()  # 他のミッションを停止して手動に戻す
+
+                # 飛行状態記録処理
+                if self.auto_landing_log_recording:
+                    self.record_auto_landing_log_data()
         else:
             if self.auto_landing_enabled:
                 # 自動離着陸を無効化
@@ -3445,22 +3612,28 @@ class TelemetryApp(QMainWindow):
                 # Update replay button state when AUX5 is disabled
                 self.update_replay_button_state()
 
-        # 既存のミッション処理（AUX2-4）
-        mission_found = False
-        # Prioritize lower AUX numbers if multiple are on
-        for aux_number in sorted(mission_map.keys()):
-            aux_index = aux_number - 1
-            if aux_index < len(aux_values) and float(aux_values[aux_index]) > 1100: # If this mission switch is ON
-                mission_found = True
-                prev_val = self.previous_aux_values[aux_index] if aux_index < len(self.previous_aux_values) else 0
-                if float(prev_val) < 1100: # And it was previously OFF (rising edge)
-                    # 新ミッション開始時に回転角をリセット
-                    self.mission_total_rotation = 0.0
-                    self.start_mission(mission_map[aux_number])
-                break # Only handle one mission at a time
+                # 自動離着陸が無効になった場合、アクティブなミッションを停止する
+                if self.autopilot_active:
+                    self.stop_mission()
 
-        if not mission_found:
-            self.stop_mission()
+        # 既存のミッション処理（AUX2-4）
+        # 再現飛行中のみ他のミッションを無視、記録中や通常時は他のミッションも有効
+        if not (self.auto_landing_enabled and self.input_log_replaying):
+            mission_found = False
+            # Prioritize lower AUX numbers if multiple are on
+            for aux_number in sorted(mission_map.keys()):
+                aux_index = aux_number - 1
+                if aux_index < len(aux_values) and float(aux_values[aux_index]) > 1100: # If this mission switch is ON
+                    mission_found = True
+                    prev_val = self.previous_aux_values[aux_index] if aux_index < len(self.previous_aux_values) else 0
+                    if float(prev_val) < 1100: # And it was previously OFF (rising edge)
+                        # 新ミッション開始時に回転角をリセット
+                        self.mission_total_rotation = 0.0
+                        self.start_mission(mission_map[aux_number])
+                    break # Only handle one mission at a time
+
+            if not mission_found:
+                self.stop_mission()
 
         # previous_aux_valuesをaux_valuesの長さに合わせて更新（数値として保存）
         self.previous_aux_values = [float(val) for val in aux_values]
@@ -3515,6 +3688,10 @@ class TelemetryApp(QMainWindow):
     def run_autopilot_cycle(self):
         if not self.is_connected:
             return
+
+        # Process input log replay and auto landing log replay
+        self.process_input_log_replay()
+        self.process_auto_landing_log_replay()
 
         if not self.autopilot_active:
             if self.last_autopilot_commands:
@@ -3672,6 +3849,14 @@ class TelemetryApp(QMainWindow):
             else:
                 # ミッション完了後は水平飛行
                 target_roll = 0
+        elif self.active_mission_mode == 4:  # 再現飛行ミッション
+            # 再現飛行中は入力再生処理で直接シリアル送信済みなので、ここでは何もしない
+            if self.input_log_replaying:
+                # 入力再生処理で既にシリアル送信済み、追加の制御は行わない
+                return
+            else:
+                # 再現飛行でない場合は手動操縦として処理
+                target_altitude = self.mission_start_altitude
         else:
             # 手動操縦時：ミッション開始時の高度を基準とする
             target_altitude = self.mission_start_altitude
@@ -3907,6 +4092,238 @@ class TelemetryApp(QMainWindow):
             print("マーカー位置をデフォルトにリセットしました")
         except Exception as e:
             print(f"マーカー位置リセットエラー: {e}")
+
+    # --- Auto Landing Log System Methods ---
+
+    def toggle_auto_landing_log_recording(self):
+        """Toggle auto landing log recording"""
+        if self.auto_landing_log_recording:
+            self.stop_auto_landing_log_recording()
+        else:
+            self.start_auto_landing_log_recording()
+
+    def start_auto_landing_log_recording(self):
+        """Start recording flight state data for auto landing log"""
+        if not self.auto_landing_enabled:
+            print("自動離着陸が有効化されていません")
+            return
+
+        self.auto_landing_log_recording = True
+        self.auto_landing_log_data = []
+        self.auto_landing_log_start_time = time.time()
+        self.auto_landing_log_last_record_time = 0
+
+        # Update UI
+        self.auto_landing_log_record_button.setText("記録中...")
+        self.auto_landing_log_record_button.setStyleSheet("background-color: #dc3545; color: white;")
+        self.auto_landing_log_stop_record_button.setEnabled(True)
+        self.auto_landing_log_status_label.setText("状態: 飛行状態記録中")
+
+        print("飛行状態記録開始")
+
+    def stop_auto_landing_log_recording(self):
+        """Stop recording and save flight state data"""
+        if not self.auto_landing_log_recording:
+            return
+
+        self.auto_landing_log_recording = False
+
+        # Save log data to file with dialog
+        if self.auto_landing_log_data:
+            self.save_auto_landing_log_with_dialog()
+
+        # Update UI
+        self.auto_landing_log_record_button.setText("飛行状態記録開始")
+        self.auto_landing_log_record_button.setStyleSheet("background-color: #28a745; color: white;")
+        self.auto_landing_log_stop_record_button.setEnabled(False)
+        self.auto_landing_log_status_label.setText("状態: 待機中")
+
+        print("飛行状態記録停止")
+
+    def save_auto_landing_log_with_dialog(self):
+        """Save auto landing log data with file dialog"""
+        try:
+            # Create default filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_filename = f"auto_landing_log_{timestamp}.json"
+
+            # Open save dialog
+            os.makedirs("logs", exist_ok=True)
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "自動離着陸ログを保存",
+                os.path.join("logs", default_filename),
+                "JSON files (*.json);;All files (*.*)"
+            )
+
+            if not file_path:
+                print("ファイル保存がキャンセルされました")
+                return
+
+            # Save the data
+            with open(file_path, 'w') as f:
+                json.dump(self.auto_landing_log_data, f, indent=2)
+
+            print(f"飛行状態ログを保存しました: {file_path}")
+            print(f"記録データ点数: {len(self.auto_landing_log_data)}")
+
+        except Exception as e:
+            print(f"飛行状態ログの保存中にエラーが発生しました: {e}")
+
+    def record_auto_landing_log_data(self):
+        """Record current flight state data"""
+        if not self.auto_landing_log_recording:
+            return
+
+        current_time = time.time()
+
+        # Check if enough time has passed since last recording
+        if current_time - self.auto_landing_log_last_record_time < self.auto_landing_log_interval:
+            return
+
+        self.auto_landing_log_last_record_time = current_time
+        elapsed_time = current_time - self.auto_landing_log_start_time
+
+        # Get current flight state data
+        altitude = getattr(self, 'current_altitude', 0.0)  # Get current altitude from telemetry
+        yaw_angle = getattr(self, 'current_yaw', 0.0)      # Get current yaw angle from telemetry
+        throttle = getattr(self, 'current_throttle', 0.0)  # Get current throttle from propeller inputs
+        aux1 = getattr(self, 'current_aux1', 0.0)          # Get current AUX1 (material drop timing)
+
+        # Create log entry
+        log_entry = {
+            'timestamp': current_time,
+            'elapsed_time': elapsed_time,
+            'altitude': altitude,
+            'yaw': yaw_angle,
+            'throttle': throttle,
+            'aux1': aux1
+        }
+
+        self.auto_landing_log_data.append(log_entry)
+
+        # Optional: Print periodic updates
+        if len(self.auto_landing_log_data) % 10 == 0:
+            print(f"飛行状態記録中: {len(self.auto_landing_log_data)} データ点")
+
+    def load_auto_landing_log(self):
+        """Load auto landing log file with dialog"""
+        try:
+            # Open file dialog to select log file
+            os.makedirs("logs", exist_ok=True)
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "自動離着陸ログファイルを選択",
+                "logs",
+                "JSON files (*.json);;All files (*.*)"
+            )
+
+            if not file_path:
+                print("ファイル選択がキャンセルされました")
+                return
+
+            with open(file_path, 'r') as f:
+                self.loaded_auto_landing_log = json.load(f)
+
+            print(f"自動離着陸ログ読み込み完了: {file_path}")
+            print(f"データ点数: {len(self.loaded_auto_landing_log)}")
+
+            # Enable replay button
+            self.auto_landing_log_replay_button.setEnabled(True)
+            self.auto_landing_log_status_label.setText(f"状態: ログ読み込み完了 ({len(self.loaded_auto_landing_log)} データ点)")
+
+        except Exception as e:
+            print(f"自動離着陸ログの読み込み中にエラーが発生しました: {e}")
+
+    def start_auto_landing_log_replay(self):
+        """Start auto landing log replay"""
+        if not self.loaded_auto_landing_log:
+            print("自動離着陸ログが読み込まれていません")
+            return
+
+        if not self.auto_landing_enabled:
+            print("自動離着陸が有効化されていません")
+            return
+
+        self.auto_landing_log_replaying = True
+        self.auto_landing_log_replay_start_time = time.time()
+        self.auto_landing_log_replay_index = 0
+
+        # Update UI
+        self.auto_landing_log_replay_button.setEnabled(False)
+        self.auto_landing_log_stop_replay_button.setEnabled(True)
+        self.auto_landing_log_status_label.setText("状態: ログ再現飛行中")
+
+        print(f"自動離着陸ログ再現飛行開始: {len(self.loaded_auto_landing_log)} データ点")
+
+    def stop_auto_landing_log_replay(self):
+        """Stop auto landing log replay"""
+        if not self.auto_landing_log_replaying:
+            return
+
+        self.auto_landing_log_replaying = False
+
+        # ログ再現飛行停止が押されたら即座にミッションモード4から抜け出す
+        if self.autopilot_active and self.active_mission_mode == 4:
+            self.stop_mission()
+
+        # Update UI
+        self.auto_landing_log_replay_button.setEnabled(True)
+        self.auto_landing_log_stop_replay_button.setEnabled(False)
+        self.auto_landing_log_status_label.setText("状態: 再現停止")
+
+        print("自動離着陸ログ再現飛行停止")
+
+    def process_auto_landing_log_replay(self):
+        """Process auto landing log replay - sends flight state commands"""
+        if not self.auto_landing_log_replaying or not self.loaded_auto_landing_log:
+            return
+
+        current_time = time.time()
+        elapsed_time = current_time - self.auto_landing_log_replay_start_time
+
+        # Find the appropriate data point based on elapsed time
+        target_index = None
+        for i, data_point in enumerate(self.loaded_auto_landing_log):
+            if data_point['elapsed_time'] <= elapsed_time:
+                target_index = i
+            else:
+                break
+
+        if target_index is not None and target_index != self.auto_landing_log_replay_index:
+            self.auto_landing_log_replay_index = target_index
+            data_point = self.loaded_auto_landing_log[target_index]
+
+            # Use flight state data to generate control commands
+            # This would typically involve converting altitude, yaw, throttle, aux1
+            # into appropriate control surface commands
+            altitude_target = data_point['altitude']
+            yaw_target = data_point['yaw']
+            throttle_target = data_point['throttle']
+            aux1_target = data_point['aux1']
+
+            # For now, send throttle and aux1 directly, use flight state for guidance
+            # In a real implementation, you would convert flight state to control surfaces
+            ail = 0  # Would be calculated from yaw target
+            elev = 0  # Would be calculated from altitude target
+            thro = int(throttle_target)
+            rudd = 0  # Would be calculated from yaw target
+            aux1 = int(aux1_target)
+
+            # Always use mission mode 4 during replay
+            command = f"${ail},{elev},{thro},{rudd},{aux1},0,0,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*"
+
+            if self.autopilot_serial and self.autopilot_serial.is_open:
+                try:
+                    self.autopilot_serial.write(command.encode() + b'\n')
+                    print(f"Auto landing replay data sent: Alt={altitude_target}, Yaw={yaw_target}, Thro={throttle_target}, AUX1={aux1_target}")
+                except Exception as e:
+                    print(f"Serial write error during auto landing replay: {e}")
+
+    def update_auto_landing_log_interval(self, value):
+        """Update auto landing log recording interval"""
+        self.auto_landing_log_interval = value
+        print(f"自動離着陸ログ記録間隔を {value} 秒に設定しました")
 
     def closeEvent(self, event):
         if self.video_thread and self.video_thread.isRunning():
