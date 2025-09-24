@@ -12,6 +12,10 @@ import os
 import glob
 import time
 from datetime import datetime
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -364,6 +368,138 @@ class Attitude2DWidget(QWidget):
                                    f"現在: {self._angle:.1f}°")
         finally:
             painter.end()
+
+# --- Flight State Graph Widget ---
+class FlightStateGraphWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumSize(600, 600)  # Reduced size to fit better
+
+        # Create matplotlib figure and canvas
+        self.figure = Figure(figsize=(8, 8))  # Smaller figure size
+        self.canvas = FigureCanvas(self.figure)        # Create layout
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.canvas)
+
+        # Data storage
+        self.log_data = []
+
+        # Initialize empty plots
+        self.clear_plots()
+
+    def clear_plots(self):
+        """Clear all plots and set up empty axes"""
+        self.figure.clear()
+
+        # Create 4x1 subplot layout (4 rows, 1 column)
+        self.ax1 = self.figure.add_subplot(4, 1, 1)  # Altitude
+        self.ax2 = self.figure.add_subplot(4, 1, 2)  # Yaw angle
+        self.ax3 = self.figure.add_subplot(4, 1, 3)  # Throttle
+        self.ax4 = self.figure.add_subplot(4, 1, 4)  # AUX1
+
+        # Set titles and labels in English
+        self.ax1.set_title('Altitude Change', fontsize=12, fontweight='bold')
+        self.ax1.set_ylabel('Altitude (mm)')
+        self.ax1.grid(True, alpha=0.3)
+        self.ax1.tick_params(labelbottom=False)  # Hide x-axis labels for top plots
+
+        self.ax2.set_title('Yaw Angle Change', fontsize=12, fontweight='bold')
+        self.ax2.set_ylabel('Yaw Angle (deg)')
+        self.ax2.grid(True, alpha=0.3)
+        self.ax2.tick_params(labelbottom=False)  # Hide x-axis labels for middle plots
+
+        self.ax3.set_title('Throttle Value', fontsize=12, fontweight='bold')
+        self.ax3.set_ylabel('Throttle')
+        self.ax3.grid(True, alpha=0.3)
+        self.ax3.tick_params(labelbottom=False)  # Hide x-axis labels for middle plots
+
+        self.ax4.set_title('Material Drop Timing (AUX1)', fontsize=12, fontweight='bold')
+        self.ax4.set_xlabel('Time (sec)')  # Only show x-axis label on bottom plot
+        self.ax4.set_ylabel('AUX1 Value')
+        self.ax4.grid(True, alpha=0.3)
+
+        # Adjust layout with proper margins for y-axis labels
+        self.figure.subplots_adjust(left=0.9, right=0.95, top=0.95, bottom=0.1, hspace=0.3)
+        self.figure.tight_layout(pad=1.0)  # Reduced padding for better space usage
+        self.canvas.draw()
+
+    def update_plots(self, log_data):
+        """Update plots with new log data"""
+        if not log_data:
+            self.clear_plots()
+            return
+
+        self.log_data = log_data
+
+        # Extract data for plotting
+        times = [point['elapsed_time'] for point in log_data]
+        altitudes = [point['altitude'] for point in log_data]
+        yaw_angles = [point['yaw'] for point in log_data]
+        throttles = [point['throttle'] for point in log_data]
+        aux1_values = [point['aux1'] for point in log_data]
+
+        # Clear previous plots
+        self.ax1.clear()
+        self.ax2.clear()
+        self.ax3.clear()
+        self.ax4.clear()
+
+        # Plot 1: Altitude
+        self.ax1.plot(times, altitudes, 'b-', linewidth=2, label='Altitude')
+        self.ax1.set_title('Altitude Change', fontsize=12, fontweight='bold')
+        self.ax1.set_ylabel('Altitude (mm)')
+        self.ax1.grid(True, alpha=0.3)
+        self.ax1.tick_params(labelbottom=False)  # Hide x-axis labels for top plots
+        # Set altitude axis with proper scale
+        if altitudes:
+            alt_min, alt_max = min(altitudes), max(altitudes)
+            alt_range = alt_max - alt_min
+            if alt_range > 0:
+                self.ax1.set_ylim(alt_min - alt_range*0.1, alt_max + alt_range*0.1)
+
+        # Plot 2: Yaw angle
+        self.ax2.plot(times, yaw_angles, 'r-', linewidth=2, label='Yaw Angle')
+        self.ax2.set_title('Yaw Angle Change', fontsize=12, fontweight='bold')
+        self.ax2.set_ylabel('Yaw Angle (deg)')
+        self.ax2.set_ylim(0, 360)  # Fixed scale for yaw (0-360 degrees)
+        self.ax2.grid(True, alpha=0.3)
+        self.ax2.tick_params(labelbottom=False)  # Hide x-axis labels for middle plots
+        # Add major ticks every 45 degrees
+        self.ax2.set_yticks([0, 45, 90, 135, 180, 225, 270, 315, 360])
+
+        # Plot 3: Throttle
+        self.ax3.plot(times, throttles, 'g-', linewidth=2, label='Throttle')
+        self.ax3.set_title('Throttle Value', fontsize=12, fontweight='bold')
+        self.ax3.set_ylabel('Throttle')
+        self.ax3.grid(True, alpha=0.3)
+        self.ax3.tick_params(labelbottom=False)  # Hide x-axis labels for middle plots
+        # Set throttle axis with typical RC range
+        self.ax3.set_ylim(1000, 2000)  # Typical RC servo range
+        self.ax3.set_yticks([1000, 1200, 1400, 1600, 1800, 2000])
+
+        # Plot 4: AUX1
+        self.ax4.plot(times, aux1_values, 'm-', linewidth=2, label='AUX1')
+        self.ax4.set_title('Material Drop Timing (AUX1)', fontsize=12, fontweight='bold')
+        self.ax4.set_xlabel('Time (sec)')  # Only show x-axis label on bottom plot
+        self.ax4.set_ylabel('AUX1 Value')
+        self.ax4.grid(True, alpha=0.3)
+        # Set AUX1 axis with typical RC range
+        self.ax4.set_ylim(1000, 2000)  # Typical RC servo range
+        self.ax4.set_yticks([1000, 1200, 1400, 1600, 1800, 2000])
+
+        # Set common time axis for all plots
+        if times:
+            time_max = max(times)
+            for ax in [self.ax1, self.ax2, self.ax3, self.ax4]:
+                ax.set_xlim(0, time_max + time_max*0.05)
+                # Add time ticks every 5 seconds or appropriate interval
+                if time_max > 0:
+                    tick_interval = max(1, int(time_max / 10))  # About 10 ticks
+                    ax.set_xticks(range(0, int(time_max) + tick_interval, tick_interval))
+
+        # Adjust layout and refresh
+        self.figure.tight_layout(pad=2.0)
+        self.canvas.draw()
 
 # --- Position Visualization Widgets for Auto Landing ---
 class PositionVisualizationWidget(QWidget):
@@ -1097,11 +1233,11 @@ class TelemetryApp(QMainWindow):
 
         # Center panel: Position and attitude visualization
         center_panel = self._create_auto_landing_center_panel()
-        main_layout.addWidget(center_panel, 2)
+        main_layout.addWidget(center_panel, 1)  # Reduced from 2 to 1 for more graph space
 
         # Right panel: Parameter panels
         right_panel = self._create_auto_landing_right_panel()
-        main_layout.addWidget(right_panel, 1)
+        main_layout.addWidget(right_panel, 2)  # Increased from 1 to 2 for more graph space
 
         # Add Auto Landing tab to tab widget
         self.tab_widget.addTab(auto_landing_widget, "自動離着陸")
@@ -1120,11 +1256,11 @@ class TelemetryApp(QMainWindow):
 
         # Center panel: Real-time data display
         center_panel = self._create_input_replay_center_panel()
-        main_layout.addWidget(center_panel, 2)
+        main_layout.addWidget(center_panel, 1)  # Reduced from 2 to 1 for more graph space
 
         # Right panel: Log data visualization
         right_panel = self._create_input_replay_right_panel()
-        main_layout.addWidget(right_panel, 1)
+        main_layout.addWidget(right_panel, 2)  # Increased from 1 to 2 for more graph space
 
         # Add Input Replay tab to tab widget
         self.tab_widget.addTab(input_replay_widget, "プロポ入力記録・再現")
@@ -1260,14 +1396,6 @@ class TelemetryApp(QMainWindow):
 
         layout.addWidget(progress_group)
 
-        layout.addStretch()
-        return panel
-
-    def _create_input_replay_right_panel(self):
-        """Create right panel for log data visualization"""
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-
         # Loaded Log Info group
         log_info_group = QGroupBox("読み込み済みログ情報")
         log_info_layout = QVBoxLayout(log_info_group)
@@ -1299,6 +1427,23 @@ class TelemetryApp(QMainWindow):
         layout.addWidget(replay_progress_group)
 
         layout.addStretch()
+        return panel
+
+    def _create_input_replay_right_panel(self):
+        """Create right panel for log data visualization"""
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+
+        # Flight State Graph group
+        graph_group = QGroupBox("飛行状態グラフ")
+        graph_layout = QVBoxLayout(graph_group)
+
+        # Create and add the flight state graph widget
+        self.flight_state_graph = FlightStateGraphWidget()
+        graph_layout.addWidget(self.flight_state_graph)
+
+        layout.addWidget(graph_group)
+
         return panel
 
     def _create_auto_landing_left_panel(self):
@@ -4138,6 +4283,11 @@ class TelemetryApp(QMainWindow):
         self.auto_landing_log_stop_record_button.setEnabled(False)
         self.auto_landing_log_status_label.setText("状態: 待機中")
 
+        # Update flight state graph with recorded data
+        if self.auto_landing_log_data and hasattr(self, 'flight_state_graph'):
+            self.flight_state_graph.update_plots(self.auto_landing_log_data)
+            print("記録データでグラフを更新しました")
+
         print("飛行状態記録停止")
 
     def save_auto_landing_log_with_dialog(self):
@@ -4231,6 +4381,11 @@ class TelemetryApp(QMainWindow):
             # Enable replay button
             self.auto_landing_log_replay_button.setEnabled(True)
             self.auto_landing_log_status_label.setText(f"状態: ログ読み込み完了 ({len(self.loaded_auto_landing_log)} データ点)")
+
+            # Update flight state graph with loaded data
+            if hasattr(self, 'flight_state_graph'):
+                self.flight_state_graph.update_plots(self.loaded_auto_landing_log)
+                print("飛行状態グラフを更新しました")
 
         except Exception as e:
             print(f"自動離着陸ログの読み込み中にエラーが発生しました: {e}")
