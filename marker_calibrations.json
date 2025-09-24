@@ -1,36 +1,20 @@
 {
-  "last_updated": "2025-09-23T14:50:27.946286",
-  "version": "1.0",
-  "markers": {
-    "1": [
-      {},
-      {
-        "distance": 2.4,
-        "size": 281.0,
-        "x": 142.0,
-        "y": 181.0
-      },
-      {
-        "distance": 2.4,
-        "size": 282.0,
-        "x": 142.0,
-        "y": 181.0
-      }
-    ],
-    "2": [
-      {},
-      {
-        "distance": 2.37,
-        "size": 281.0,
-        "x": 139.0,
-        "y": 178.0
-      },
-      {
-        "distance": 2.37,
-        "size": 280.0,
-        "x": 138.0,
-        "y": 179.0
-      }
-    ]
+  "last_updated": "2025-09-24T00:00:00.000000",
+  "version": "2.0",
+  "angle_calibrations": {
+    "1": {
+      "offset_angle": 0.0
+    },
+    "2": {
+      "offset_angle": 0.0
+    },
+    "3": {
+      "offset_angle": 0.0
+    }
+  },
+  "distance_calibrations": {
+    "1": [],
+    "2": [],
+    "3": []
   }
 }

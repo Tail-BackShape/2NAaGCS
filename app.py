@@ -10,6 +10,7 @@ import requests
 import json
 import os
 import glob
+import time
 from datetime import datetime
 
 from PySide6.QtWidgets import (
@@ -262,9 +263,17 @@ class Attitude2DWidget(QWidget):
     def __init__(self, image_path, parent=None):
         super().__init__(parent)
         self.setMinimumSize(150, 150)
+
+        # Get absolute path to ensure image loading works regardless of working directory
+        if not os.path.isabs(image_path):
+            # Get the directory where this script is located
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            image_path = os.path.join(script_dir, image_path)
+
         self.pixmap = QPixmap(image_path)
         if self.pixmap.isNull():
             print(f"画像の読み込みに失敗: {image_path}")
+            print(f"ファイル存在確認: {os.path.exists(image_path)}")
         self._angle = 0
         self._target_angle = None  # 目標角度（None = 非表示）
         self._autopilot_active = False
@@ -601,7 +610,8 @@ class CalibrationGraphWidget(QWidget):
         if not self.calibration_data:
             # No data message
             painter.setPen(QPen(QColor("white"), 1))
-            painter.drawText(self.rect().center() + QPointF(-100, 0), "キャリブレーションデータがありません")
+            center_point = QPointF(self.rect().center())  # QPointをQPointFに変換
+            painter.drawText(center_point + QPointF(-100, 0), "キャリブレーションデータがありません")
             return
 
         # Graph area
@@ -800,6 +810,10 @@ class TelemetryApp(QMainWindow):
         ("八の字左旋回角 (度)", "figure8_left_target", "-320.0"),
         ("上昇前高度 (m)", "altitude_low", "2.5"),
         ("上昇後高度 (m)", "altitude_high", "5.0"),
+        ("上昇時ピッチオフセット (度)", "ascending_pitch_offset", "5.0"),
+        ("上昇スロットル基準", "ascending_throttle_base", "800.0"),
+        ("LiDAR高度補正有効", "lidar_bank_correction_enable", "1"),
+        ("LiDAR最大補正角度 (度)", "lidar_max_correction_angle", "45.0"),
         ("自動スロットル基準", "autopilot_throttle_base", "700.0"),
         ("高度制御スロットルゲイン", "altitude_throttle_gain", "20.0"),
         ("スロットル最小値", "throttle_min", "400.0"),
@@ -886,6 +900,16 @@ class TelemetryApp(QMainWindow):
         self.ascending_completed = False
         self.ascending_phase_start_rotation = 0  # フェーズ開始時の総回転角
 
+        # --- Propeller Input Log System ---
+        self.input_log_recording = False
+        self.input_log_data = []  # {'timestamp': time, 'ail': val, 'elev': val, 'thro': val, 'rudd': val}
+        self.input_log_start_time = 0
+        self.input_log_last_record_time = 0  # 最後に記録した時刻（0.1秒間隔制御用）
+        self.input_log_replaying = False
+        self.input_log_replay_start_time = 0
+        self.input_log_replay_index = 0
+        self.loaded_input_log = []
+
         # --- Auto Landing State ---
         self.auto_landing_enabled = False
         self.auto_landing_phase = 0  # 0: Manual, 1: Takeoff, 2: Drop, 3: Steady, 4: Landing
@@ -902,9 +926,74 @@ class TelemetryApp(QMainWindow):
         self.load_pid_gains() # Also initializes PID controllers
         self.load_autopilot_params() # Load autopilot parameters
         self.load_auto_landing_params() # Load auto landing parameters
+        self.load_marker_calibrations() # Load marker calibrations (angle + distance)
         self.load_auto_landing_ui_params() # Load parameters into UI
         self._setup_timers()
         self.update_com_ports()
+
+        # 初期化完了後に距離キャリブレーション状況を確認・報告
+        self.validate_distance_calibrations()
+
+    def validate_distance_calibrations(self):
+        """距離キャリブレーションデータの読み込み状況を検証・報告"""
+        print("\n=== 距離キャリブレーション検証 ===")
+
+        if not hasattr(self, 'marker_distance_calibrations'):
+            print("ERROR: marker_distance_calibrations属性が存在しません")
+            return
+
+        if not self.marker_distance_calibrations:
+            print("WARNING: marker_distance_calibrationsが空です")
+            # 再読み込み試行
+            print("距離キャリブレーション再読み込み試行中...")
+            self.load_marker_distance_calibrations()
+
+        print(f"距離キャリブレーション読み込み状況:")
+        for marker_id in [1, 2, 3]:
+            if marker_id in self.marker_distance_calibrations:
+                count = len(self.marker_distance_calibrations[marker_id])
+                print(f"  マーカー {marker_id}: {count} ポイント")
+                if count > 0:
+                    for i, calib in enumerate(self.marker_distance_calibrations[marker_id]):
+                        print(f"    ポイント{i+1}: 距離={calib.get('distance')}m, サイズ={calib.get('size')}px")
+            else:
+                print(f"  マーカー {marker_id}: データなし")
+
+        print("=====================================\n")
+
+    def get_corrected_altitude(self, raw_altitude_mm, current_roll_deg):
+        """
+        LiDAR高度をバンク角で補正して真の高度を計算する
+
+        Args:
+            raw_altitude_mm (float): LiDARからの生高度（mm）
+            current_roll_deg (float): 現在のバンク角（度）
+
+        Returns:
+            float: 補正後の高度（mm）
+        """
+        # 補正が無効の場合はそのまま返す
+        correction_enabled = float(self.current_autopilot_params.get('lidar_bank_correction_enable', 1))
+        if correction_enabled == 0:
+            return raw_altitude_mm
+
+        # 最大補正角度を超える場合は補正しない（測定値の信頼性が低いため）
+        max_correction_angle = float(self.current_autopilot_params.get('lidar_max_correction_angle', 45.0))
+        if abs(current_roll_deg) > max_correction_angle:
+            return raw_altitude_mm
+
+        # コサイン補正：真の高度 = LiDAR測定値 / cos(バンク角)
+        import math
+        roll_rad = math.radians(abs(current_roll_deg))
+        cos_roll = math.cos(roll_rad)
+
+        # ゼロ除算を避ける
+        if cos_roll < 0.001:  # 約89.94度以上
+            return raw_altitude_mm
+
+        corrected_altitude = raw_altitude_mm / cos_roll
+
+        return corrected_altitude
 
     @staticmethod
     def normalize_value(value, min_in, max_in, min_out=-1.0, max_out=1.0):
@@ -932,6 +1021,9 @@ class TelemetryApp(QMainWindow):
 
         # Create Auto Landing tab (new functionality)
         self._create_auto_landing_tab()
+
+        # Create Input Replay tab (propeller input recording/replay system)
+        self._create_input_replay_tab()
 
     def _create_gcs_tab(self):
         gcs_widget = QWidget()
@@ -992,6 +1084,178 @@ class TelemetryApp(QMainWindow):
 
         # Create calibration graph tab
         self._create_calibration_graph_tab()
+
+    def _create_input_replay_tab(self):
+        """Create the Input Replay tab for propeller input recording/replay system"""
+        input_replay_widget = QWidget()
+        main_layout = QHBoxLayout(input_replay_widget)
+
+        # Left panel: Input Log System controls
+        left_panel = self._create_input_replay_left_panel()
+        main_layout.addWidget(left_panel, 1)
+
+        # Center panel: Real-time data display
+        center_panel = self._create_input_replay_center_panel()
+        main_layout.addWidget(center_panel, 2)
+
+        # Right panel: Log data visualization
+        right_panel = self._create_input_replay_right_panel()
+        main_layout.addWidget(right_panel, 1)
+
+        # Add Input Replay tab to tab widget
+        self.tab_widget.addTab(input_replay_widget, "プロポ入力記録・再現")
+
+    def _create_input_replay_left_panel(self):
+        """Create left panel for input replay controls"""
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+
+        # Input Log System group
+        log_group = QGroupBox("プロポ入力ログシステム")
+        log_layout = QVBoxLayout(log_group)
+
+        # Recording controls
+        record_layout = QHBoxLayout()
+        self.record_button = QPushButton("記録開始")
+        self.record_button.setCheckable(True)
+        self.record_button.clicked.connect(self.toggle_input_recording)
+
+        self.record_status_label = QLabel("待機中")
+        self.record_status_label.setStyleSheet("color: #888; font-weight: bold;")
+
+        record_layout.addWidget(self.record_button)
+        record_layout.addWidget(self.record_status_label)
+        log_layout.addLayout(record_layout)
+
+        # Load/Save controls
+        file_layout = QHBoxLayout()
+        self.save_log_button = QPushButton("ログ保存")
+        self.load_log_button = QPushButton("ログ読み込み")
+        self.save_log_button.clicked.connect(self.save_input_log)
+        self.load_log_button.clicked.connect(self.load_input_log)
+
+        file_layout.addWidget(self.save_log_button)
+        file_layout.addWidget(self.load_log_button)
+        log_layout.addLayout(file_layout)
+
+        # Replay controls
+        replay_layout = QHBoxLayout()
+        self.replay_button = QPushButton("ログ再現飛行開始")
+        self.replay_button.clicked.connect(self.toggle_input_replay)
+        self.replay_button.setEnabled(False)  # AUX5が有効な時のみ使用可能
+
+        self.replay_status_label = QLabel("ログ未読み込み")
+        self.replay_status_label.setStyleSheet("color: #888; font-weight: bold;")
+
+        replay_layout.addWidget(self.replay_button)
+        replay_layout.addWidget(self.replay_status_label)
+        log_layout.addLayout(replay_layout)
+
+        # Log info
+        self.log_info_label = QLabel("記録データ: なし")
+        self.log_info_label.setStyleSheet("color: #666; font-size: 10px;")
+        log_layout.addWidget(self.log_info_label)
+
+        layout.addWidget(log_group)
+
+        # AUX5 Status group
+        aux5_group = QGroupBox("AUX5状態 (自動離着陸スイッチ)")
+        aux5_layout = QVBoxLayout(aux5_group)
+
+        self.aux5_status_label = QLabel("AUX5: 無効")
+        self.aux5_status_label.setStyleSheet("color: #dc3545; font-weight: bold; font-size: 14px;")
+        aux5_layout.addWidget(self.aux5_status_label)
+
+        aux5_note = QLabel("※ ログ再現にはAUX5が有効である必要があります")
+        aux5_note.setStyleSheet("color: #666; font-size: 10px;")
+        aux5_layout.addWidget(aux5_note)
+
+        layout.addWidget(aux5_group)
+
+        layout.addStretch()
+        return panel
+
+    def _create_input_replay_center_panel(self):
+        """Create center panel for real-time data display"""
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+
+        # Current Input Values group
+        input_group = QGroupBox("現在のプロポ入力値")
+        input_layout = QGridLayout(input_group)
+
+        # Create labels for current input values
+        self.current_ail_label = QLabel("エルロン: ---")
+        self.current_elev_label = QLabel("エレベーター: ---")
+        self.current_thro_label = QLabel("スロットル: ---")
+        self.current_rudd_label = QLabel("ラダー: ---")
+        self.current_aux1_label = QLabel("AUX1: ---")
+
+        input_layout.addWidget(QLabel("AIL:"), 0, 0)
+        input_layout.addWidget(self.current_ail_label, 0, 1)
+        input_layout.addWidget(QLabel("ELEV:"), 1, 0)
+        input_layout.addWidget(self.current_elev_label, 1, 1)
+        input_layout.addWidget(QLabel("THRO:"), 2, 0)
+        input_layout.addWidget(self.current_thro_label, 2, 1)
+        input_layout.addWidget(QLabel("RUDD:"), 3, 0)
+        input_layout.addWidget(self.current_rudd_label, 3, 1)
+        input_layout.addWidget(QLabel("AUX1:"), 4, 0)
+        input_layout.addWidget(self.current_aux1_label, 4, 1)
+
+        layout.addWidget(input_group)
+
+        # Recording Progress group
+        progress_group = QGroupBox("記録進行状況")
+        progress_layout = QVBoxLayout(progress_group)
+
+        self.recording_time_label = QLabel("記録時間: 0.0秒")
+        self.recording_points_label = QLabel("記録点数: 0点")
+        self.recording_rate_label = QLabel("記録レート: 0Hz")
+
+        progress_layout.addWidget(self.recording_time_label)
+        progress_layout.addWidget(self.recording_points_label)
+        progress_layout.addWidget(self.recording_rate_label)
+
+        layout.addWidget(progress_group)
+
+        layout.addStretch()
+        return panel
+
+    def _create_input_replay_right_panel(self):
+        """Create right panel for log data visualization"""
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+
+        # Loaded Log Info group
+        log_info_group = QGroupBox("読み込み済みログ情報")
+        log_info_layout = QVBoxLayout(log_info_group)
+
+        self.loaded_log_info_label = QLabel("ログ未読み込み")
+        self.loaded_log_duration_label = QLabel("継続時間: ---")
+        self.loaded_log_points_label = QLabel("データ点数: ---")
+
+        log_info_layout.addWidget(self.loaded_log_info_label)
+        log_info_layout.addWidget(self.loaded_log_duration_label)
+        log_info_layout.addWidget(self.loaded_log_points_label)
+
+        layout.addWidget(log_info_group)
+
+        # Replay Progress group
+        replay_progress_group = QGroupBox("再現進行状況")
+        replay_progress_layout = QVBoxLayout(replay_progress_group)
+
+        self.replay_time_label = QLabel("再現時間: 0.0秒")
+        self.replay_progress_label = QLabel("進行率: 0%")
+        self.replay_current_values_label = QLabel("現在の再現値: ---")
+
+        replay_progress_layout.addWidget(self.replay_time_label)
+        replay_progress_layout.addWidget(self.replay_progress_label)
+        replay_progress_layout.addWidget(self.replay_current_values_label)
+
+        layout.addWidget(replay_progress_group)
+
+        layout.addStretch()
+        return panel
 
     def _create_auto_landing_left_panel(self):
         """Create left panel for auto landing tab - Control enable, inputs display and parameters"""
@@ -1059,6 +1323,8 @@ class TelemetryApp(QMainWindow):
         params_layout.addRow(update_params_button)
 
         layout.addWidget(params_group)
+
+
         layout.addStretch()
 
         return panel
@@ -1459,6 +1725,203 @@ class TelemetryApp(QMainWindow):
         print(f"Set marker {marker_id} angle calibration to 0.0 degrees")
         self.save_marker_calibrations()
 
+    def toggle_input_recording(self):
+        """Toggle propeller input recording"""
+        if not self.input_log_recording:
+            # Start recording
+            self.input_log_recording = True
+            self.input_log_data = []
+            self.input_log_start_time = 0
+            self.input_log_last_record_time = 0
+
+            self.record_button.setText("記録停止")
+            self.record_button.setStyleSheet("background-color: #dc3545; color: white;")
+            self.record_status_label.setText("記録中...")
+            self.record_status_label.setStyleSheet("color: #dc3545; font-weight: bold;")
+
+            print("プロポ入力記録を開始しました")
+        else:
+            # Stop recording
+            self.input_log_recording = False
+
+            self.record_button.setText("記録開始")
+            self.record_button.setStyleSheet("")
+            self.record_status_label.setText(f"記録完了 ({len(self.input_log_data)}点)")
+            self.record_status_label.setStyleSheet("color: #28a745; font-weight: bold;")
+
+            duration = self.input_log_data[-1]['timestamp'] if self.input_log_data else 0
+            self.log_info_label.setText(f"記録データ: {len(self.input_log_data)}点, {duration:.1f}秒")
+
+            print(f"プロポ入力記録を停止しました ({len(self.input_log_data)}点, {duration:.1f}秒)")
+
+    def save_input_log(self):
+        """Save recorded input log to file"""
+        if not self.input_log_data:
+            print("保存するログデータがありません")
+            return
+
+        try:
+            # Create logs directory if it doesn't exist
+            if not os.path.exists('logs'):
+                os.makedirs('logs')
+
+            # Generate filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"logs/input_log_{timestamp}.json"
+
+            # Prepare log data
+            log_data = {
+                'timestamp': datetime.now().isoformat(),
+                'duration': self.input_log_data[-1]['timestamp'] if self.input_log_data else 0,
+                'data_points': len(self.input_log_data),
+                'data': self.input_log_data
+            }
+
+            # Save to file
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(log_data, f, indent=2, ensure_ascii=False)
+
+            print(f"ログを保存しました: {filename}")
+
+        except Exception as e:
+            print(f"ログ保存エラー: {e}")
+
+    def load_input_log(self):
+        """Load input log from file"""
+        try:
+            # Find the most recent log file
+            log_files = glob.glob('logs/input_log_*.json')
+            if not log_files:
+                print("ログファイルが見つかりません")
+                self.replay_status_label.setText("ログファイルなし")
+                return
+
+            # Load the most recent file
+            latest_file = max(log_files, key=os.path.getctime)
+
+            with open(latest_file, 'r', encoding='utf-8') as f:
+                log_data = json.load(f)
+
+            self.loaded_input_log = log_data['data']
+            duration = log_data.get('duration', 0)
+            data_points = log_data.get('data_points', len(self.loaded_input_log))
+
+            self.replay_status_label.setText(f"ログ読み込み完了 ({data_points}点)")
+            self.replay_status_label.setStyleSheet("color: #28a745; font-weight: bold;")
+
+            # Update loaded log info in input replay tab
+            if hasattr(self, 'loaded_log_info_label'):
+                self.loaded_log_info_label.setText(f"ファイル: {os.path.basename(latest_file)}")
+                self.loaded_log_duration_label.setText(f"継続時間: {duration:.1f}秒")
+                self.loaded_log_points_label.setText(f"データ点数: {data_points}点")
+
+            # Update replay button state based on AUX5
+            self.update_replay_button_state()
+
+            print(f"ログを読み込みました: {latest_file} ({data_points}点, {duration:.1f}秒)")
+
+        except Exception as e:
+            print(f"ログ読み込みエラー: {e}")
+            self.replay_status_label.setText("ログ読み込みエラー")
+
+    def toggle_input_replay(self):
+        """Toggle input log replay"""
+        if not self.input_log_replaying:
+            # Start replay
+            if not self.loaded_input_log:
+                print("再現するログがありません")
+                return
+
+            if not self.auto_landing_enabled:
+                print("AUX5が無効のため、ログ再現を開始できません")
+                return
+
+            self.input_log_replaying = True
+            self.input_log_replay_start_time = time.time()
+            self.input_log_replay_index = 0
+
+            # Start mission mode 4 for input replay
+            self.start_mission(4)
+
+            self.replay_button.setText("再現停止")
+            self.replay_button.setStyleSheet("background-color: #dc3545; color: white;")
+            self.replay_status_label.setText("再現中...")
+            self.replay_status_label.setStyleSheet("color: #dc3545; font-weight: bold;")
+
+            print(f"ログ再現飛行を開始しました (ミッションモード4) ({len(self.loaded_input_log)}点)")
+        else:
+            # Stop replay
+            self.input_log_replaying = False
+
+            # Stop mission when replay is stopped
+            self.stop_mission()
+
+            self.replay_button.setText("ログ再現飛行開始")
+            self.replay_button.setStyleSheet("")
+            self.replay_status_label.setText("再現停止")
+            self.replay_status_label.setStyleSheet("color: #6c757d; font-weight: bold;")
+
+            print("ログ再現飛行を手動停止しました (ミッション停止)")
+
+    def update_replay_button_state(self):
+        """Update replay button enabled state based on AUX5 and loaded log"""
+        can_replay = self.auto_landing_enabled and len(self.loaded_input_log) > 0
+        self.replay_button.setEnabled(can_replay)
+
+        if can_replay:
+            self.replay_button.setText("ログ再現飛行開始")
+            self.replay_button.setStyleSheet("")
+
+        # Update AUX5 status in input replay tab
+        if hasattr(self, 'aux5_status_label'):
+            if self.auto_landing_enabled:
+                self.aux5_status_label.setText("AUX5: 有効")
+                self.aux5_status_label.setStyleSheet("color: #28a745; font-weight: bold; font-size: 14px;")
+            else:
+                self.aux5_status_label.setText("AUX5: 無効")
+                self.aux5_status_label.setStyleSheet("color: #dc3545; font-weight: bold; font-size: 14px;")
+
+    def update_input_replay_displays(self, ail, elev, thro, rudd, aux1):
+        """Update real-time displays in input replay tab"""
+        # Update current input values
+        if hasattr(self, 'current_ail_label'):
+            self.current_ail_label.setText(f"エルロン: {ail}")
+            self.current_elev_label.setText(f"エレベーター: {elev}")
+            self.current_thro_label.setText(f"スロットル: {thro}")
+            self.current_rudd_label.setText(f"ラダー: {rudd}")
+            self.current_aux1_label.setText(f"AUX1: {aux1}")
+
+        # Update recording progress if recording
+        if self.input_log_recording and hasattr(self, 'recording_time_label'):
+            current_time = time.time()
+            if self.input_log_start_time > 0:
+                recording_time = current_time - self.input_log_start_time
+                recording_points = len(self.input_log_data)
+                recording_rate = recording_points / recording_time if recording_time > 0 else 0
+
+                self.recording_time_label.setText(f"記録時間: {recording_time:.1f}秒")
+                self.recording_points_label.setText(f"記録点数: {recording_points}点")
+                self.recording_rate_label.setText(f"記録レート: {recording_rate:.1f}Hz")
+
+        # Update replay progress if replaying
+        if self.input_log_replaying and hasattr(self, 'replay_time_label'):
+            current_time = time.time() - self.input_log_replay_start_time
+            total_duration = self.loaded_input_log[-1]['timestamp'] if self.loaded_input_log else 0
+            progress_percent = (current_time / total_duration * 100) if total_duration > 0 else 0
+            progress_percent = min(100, progress_percent)
+
+            self.replay_time_label.setText(f"再現時間: {current_time:.1f}秒")
+            self.replay_progress_label.setText(f"進行率: {progress_percent:.1f}%")
+
+            # Show current replay values if available
+            if self.input_log_replay_index < len(self.loaded_input_log):
+                current_replay = self.loaded_input_log[self.input_log_replay_index]
+                aux1_value = current_replay.get('aux1', 'N/A')
+                self.replay_current_values_label.setText(
+                    f"A:{current_replay['ail']}, E:{current_replay['elev']}, "
+                    f"T:{current_replay['thro']}, R:{current_replay['rudd']}, AUX1:{aux1_value}"
+                )
+
     def update_marker_realtime_display(self):
         """Update real-time marker data display"""
         for marker_id in [1, 2, 3]:
@@ -1516,46 +1979,142 @@ class TelemetryApp(QMainWindow):
         }
 
     def save_marker_calibrations(self):
-        """Save marker calibrations to file"""
+        """Save all marker calibrations (angle + distance) to unified JSON file"""
         try:
-            calib_file = 'marker_calibrations.txt'
-            with open(calib_file, 'w') as f:
-                for marker_id, calib in self.marker_calibrations.items():
-                    f.write(f"marker_{marker_id}_offset_angle={calib['offset_angle']}\n")
-            print("Marker calibrations saved")
+            calib_file = 'marker_calibrations.json'
+
+            # Prepare unified calibration data
+            unified_data = {
+                'last_updated': datetime.now().isoformat(),
+                'version': '2.0',
+                'angle_calibrations': self.marker_calibrations,
+                'distance_calibrations': getattr(self, 'marker_distance_calibrations', {})
+            }
+
+            with open(calib_file, 'w', encoding='utf-8') as f:
+                json.dump(unified_data, f, indent=2, ensure_ascii=False)
+
+            print("All marker calibrations saved to unified JSON file")
         except Exception as e:
             print(f"Failed to save marker calibrations: {e}")
 
     def load_marker_calibrations(self):
-        """Load marker calibrations from file"""
+        """Load all marker calibrations (angle + distance) from unified JSON file"""
         try:
-            calib_file = 'marker_calibrations.txt'
-            if not os.path.exists(calib_file):
-                return
+            calib_file = 'marker_calibrations.json'
+            print(f"Loading marker calibrations from {calib_file}")
 
-            with open(calib_file, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if '=' in line:
-                        key, value = line.split('=', 1)
+            if os.path.exists(calib_file):
+                with open(calib_file, 'r', encoding='utf-8') as f:
+                    import_data = json.load(f)
+                    print(f"JSON loaded successfully: {import_data.keys()}")
 
-                        # Parse marker calibration settings (only angle offset)
-                        if key.startswith('marker_') and '_' in key:
-                            parts = key.split('_')
-                            if len(parts) >= 3:
-                                marker_id = int(parts[1])
-                                param = '_'.join(parts[2:])
+                # Check if this is the new unified format
+                if 'angle_calibrations' in import_data:
+                    # Initialize marker_calibrations if not exists
+                    if not hasattr(self, 'marker_calibrations'):
+                        self.marker_calibrations = {1: {'offset_angle': 0.0}, 2: {'offset_angle': 0.0}, 3: {'offset_angle': 0.0}}
 
-                                if marker_id in self.marker_calibrations:
-                                    if param == 'offset_angle':
-                                        self.marker_calibrations[marker_id][param] = float(value)
-                                        # Update UI input field
-                                        if marker_id in self.marker_calib_controls:
-                                            self.marker_calib_controls[marker_id][param].setText(str(value))
+                    # Load angle calibrations
+                    for marker_id_str, calib in import_data['angle_calibrations'].items():
+                        marker_id = int(marker_id_str)
+                        if marker_id not in self.marker_calibrations:
+                            self.marker_calibrations[marker_id] = {}
+                        self.marker_calibrations[marker_id].update(calib)
 
-            print("Marker calibrations loaded")
+                        # Update UI input field if UI is initialized
+                        if hasattr(self, 'marker_calib_controls') and marker_id in self.marker_calib_controls:
+                            try:
+                                self.marker_calib_controls[marker_id]['offset_angle'].setText(str(calib.get('offset_angle', 0.0)))
+                            except Exception as ui_error:
+                                print(f"UI update failed for marker {marker_id}: {ui_error}")
+
+                    # Load distance calibrations
+                    if 'distance_calibrations' in import_data:
+                        if not hasattr(self, 'marker_distance_calibrations'):
+                            self.marker_distance_calibrations = {}
+
+                        for marker_id_str, calib_list in import_data['distance_calibrations'].items():
+                            marker_id = int(marker_id_str)
+
+                            # Filter out invalid entries and ensure complete data
+                            valid_calibrations = []
+                            for calib in calib_list:
+                                if (isinstance(calib, dict) and
+                                    all(key in calib and calib[key] is not None
+                                        for key in ['distance', 'size', 'x', 'y'])):
+                                    valid_calibrations.append(calib)
+
+                            if valid_calibrations:
+                                self.marker_distance_calibrations[marker_id] = valid_calibrations
+                                print(f"距離キャリブレーション - マーカー {marker_id}: {len(valid_calibrations)} ポイント読み込み")
+
+                    print(f"All marker calibrations loaded from unified JSON file")
+                    print(f"Angle calibrations: {self.marker_calibrations}")
+                    print(f"Distance calibrations loaded for markers: {list(self.marker_distance_calibrations.keys()) if hasattr(self, 'marker_distance_calibrations') else 'None'}")
+
+                    # 距離キャリブレーションの詳細デバッグ情報
+                    if hasattr(self, 'marker_distance_calibrations') and self.marker_distance_calibrations:
+                        for marker_id, calibs in self.marker_distance_calibrations.items():
+                            print(f"マーカー {marker_id} 距離キャリブレーション: {len(calibs)} ポイント")
+                            for i, calib in enumerate(calibs):
+                                print(f"  ポイント {i+1}: 距離={calib.get('distance', 'N/A')}m, サイズ={calib.get('size', 'N/A')}px")
+
+                elif 'markers' in import_data:
+                    # This is old distance-only format, load distance calibrations only
+                    if not hasattr(self, 'marker_distance_calibrations'):
+                        self.marker_distance_calibrations = {}
+
+                    for marker_id_str, calib_list in import_data['markers'].items():
+                        marker_id = int(marker_id_str)
+
+                        # Filter out invalid entries and ensure complete data
+                        valid_calibrations = []
+                        for calib in calib_list:
+                            if (isinstance(calib, dict) and
+                                all(key in calib and calib[key] is not None
+                                    for key in ['distance', 'size', 'x', 'y'])):
+                                valid_calibrations.append(calib)
+
+                        if valid_calibrations:
+                            self.marker_distance_calibrations[marker_id] = valid_calibrations
+                            print(f"旧形式 - マーカー {marker_id}: {len(valid_calibrations)} ポイント読み込み")
+
+                    print("Distance calibrations loaded from old JSON format")
+
+            else:
+                # Fallback: try loading from old text format for angle calibrations
+                old_calib_file = 'marker_calibrations.txt'
+                if os.path.exists(old_calib_file):
+                    with open(old_calib_file, 'r') as f:
+                        for line in f:
+                            line = line.strip()
+                            if '=' in line:
+                                key, value = line.split('=', 1)
+                                if key.startswith('marker_') and '_' in key:
+                                    parts = key.split('_')
+                                    if len(parts) >= 3:
+                                        marker_id = int(parts[1])
+                                        param = '_'.join(parts[2:])
+
+                                        if marker_id in self.marker_calibrations:
+                                            if param == 'offset_angle':
+                                                self.marker_calibrations[marker_id][param] = float(value)
+                                                # Update UI input field
+                                                if marker_id in self.marker_calib_controls:
+                                                    self.marker_calib_controls[marker_id][param].setText(str(value))
+                    print("Angle calibrations loaded from old text format")
+                else:
+                    print(f"No unified calibration file found: {calib_file}")
+
+        except json.JSONDecodeError as e:
+            print(f"Failed to parse JSON in marker calibrations file: {e}")
+        except FileNotFoundError as e:
+            print(f"Marker calibrations file not found: {e}")
         except Exception as e:
             print(f"Failed to load marker calibrations: {e}")
+            import traceback
+            traceback.print_exc()
 
     def record_marker_distance_calibration(self, marker_id):
         """Record distance calibration for a specific marker"""
@@ -1615,94 +2174,62 @@ class TelemetryApp(QMainWindow):
             print(f"Error recording marker {marker_id} distance calibration: {e}")
 
     def save_marker_distance_calibrations(self):
-        """Save marker distance calibrations to JSON file"""
-        try:
-            calib_file = 'marker_calibrations.json'
-            if not hasattr(self, 'marker_distance_calibrations'):
-                return
-
-            # Prepare data with metadata
-            export_data = {
-                'last_updated': datetime.now().isoformat(),
-                'version': '1.0',
-                'markers': self.marker_distance_calibrations
-            }
-
-            with open(calib_file, 'w', encoding='utf-8') as f:
-                json.dump(export_data, f, indent=2, ensure_ascii=False)
-
-            print("Marker distance calibrations saved to JSON")
-        except Exception as e:
-            print(f"Failed to save marker distance calibrations: {e}")
+        """Save all marker calibrations (unified method - calls save_marker_calibrations)"""
+        # This method now redirects to the unified save method
+        self.save_marker_calibrations()
 
     def load_marker_distance_calibrations(self):
-        """Load marker distance calibrations from JSON file"""
-        try:
-            calib_file = 'marker_calibrations.json'
+        """Load distance calibrations - redirects to unified method if not already loaded"""
+        # If marker calibrations haven't been loaded yet, call the unified load method
+        if not hasattr(self, 'marker_distance_calibrations') or not self.marker_distance_calibrations:
+            print("距離キャリブレーションが未読み込み - 統合読み込みメソッドを呼び出し")
+            self.load_marker_calibrations()
 
-            # First try to load from new JSON format
-            if os.path.exists(calib_file):
-                with open(calib_file, 'r', encoding='utf-8') as f:
-                    import_data = json.load(f)
-
-                if 'markers' in import_data:
-                    # Convert string keys to integers for marker IDs
+        # If still empty, try fallback methods
+        if not hasattr(self, 'marker_distance_calibrations') or not self.marker_distance_calibrations:
+            try:
+                # Fallback: try to load from old text format and convert
+                old_calib_file = 'marker_distance_calibrations.txt'
+                if os.path.exists(old_calib_file):
+                    print("Loading from old text format and converting...")
                     self.marker_distance_calibrations = {}
-                    for marker_id_str, calibrations in import_data['markers'].items():
-                        marker_id = int(marker_id_str)
-                        self.marker_distance_calibrations[marker_id] = calibrations
 
-                    print("Marker distance calibrations loaded from JSON")
-                    return
-                else:
-                    print("Invalid JSON calibration data format")
+                    with open(old_calib_file, 'r') as f:
+                        for line in f:
+                            line = line.strip()
+                            if '=' in line:
+                                key, value = line.split('=', 1)
 
-            # Fallback: try to load from old text format and convert
-            old_calib_file = 'marker_distance_calibrations.txt'
-            if os.path.exists(old_calib_file):
-                print("Loading from old text format and converting to JSON...")
-                self.marker_distance_calibrations = {}
+                                if key.startswith('marker_') and '_point_' in key:
+                                    parts = key.split('_')
+                                    if len(parts) >= 5:
+                                        marker_id = int(parts[1])
+                                        point_idx = int(parts[3])
+                                        param = parts[4]
 
-                with open(old_calib_file, 'r') as f:
-                    for line in f:
-                        line = line.strip()
-                        if '=' in line:
-                            key, value = line.split('=', 1)
+                                        if marker_id not in self.marker_distance_calibrations:
+                                            self.marker_distance_calibrations[marker_id] = []
 
-                            if key.startswith('marker_') and '_point_' in key:
-                                parts = key.split('_')
-                                if len(parts) >= 5:
-                                    marker_id = int(parts[1])
-                                    point_idx = int(parts[3])
-                                    param = parts[4]
+                                        # Ensure we have enough calibration points
+                                        while len(self.marker_distance_calibrations[marker_id]) <= point_idx:
+                                            self.marker_distance_calibrations[marker_id].append({})
 
-                                    if marker_id not in self.marker_distance_calibrations:
-                                        self.marker_distance_calibrations[marker_id] = []
+                                        self.marker_distance_calibrations[marker_id][point_idx][param] = float(value)
 
-                                    # Ensure we have enough calibration points
-                                    while len(self.marker_distance_calibrations[marker_id]) <= point_idx:
-                                        self.marker_distance_calibrations[marker_id].append({})
+                    # Clean up incomplete data
+                    for marker_id in list(self.marker_distance_calibrations.keys()):
+                        valid_points = []
+                        for point in self.marker_distance_calibrations[marker_id]:
+                            if isinstance(point, dict) and all(key in point for key in ['distance', 'size', 'x', 'y']):
+                                valid_points.append(point)
+                        self.marker_distance_calibrations[marker_id] = valid_points
 
-                                    self.marker_distance_calibrations[marker_id][point_idx][param] = float(value)
+                    # Save in new unified format
+                    self.save_marker_calibrations()
+                    print("Converted old calibration data to unified JSON format")
 
-                # Clean up incomplete data and ensure all points have required fields
-                for marker_id in list(self.marker_distance_calibrations.keys()):
-                    valid_points = []
-                    for point in self.marker_distance_calibrations[marker_id]:
-                        if isinstance(point, dict) and all(key in point for key in ['distance', 'size', 'x', 'y']):
-                            valid_points.append(point)
-                    self.marker_distance_calibrations[marker_id] = valid_points
-
-                # Save in new JSON format
-                self.save_marker_distance_calibrations()
-                print("Converted old calibration data to JSON format")
-                return
-
-            # If no calibration files exist
-            print("No calibration data files found")
-
-        except Exception as e:
-            print(f"Failed to load marker distance calibrations: {e}")
+            except Exception as e:
+                print(f"Failed to load legacy distance calibrations: {e}")
 
     def estimate_distance_from_marker(self, marker_id):
         """Estimate distance to marker based on its size and calibration data"""
@@ -1768,18 +2295,102 @@ class TelemetryApp(QMainWindow):
             return estimated_distance
 
     def update_calibration_graph(self):
-        """Update calibration graph display"""
+        """Update calibration graph display from marker_calibrations.json"""
         if hasattr(self, 'calibration_graph_widget'):
+            # Use existing marker_distance_calibrations data if available, otherwise load from JSON
+            calibration_data = {}
+
+            if hasattr(self, 'marker_distance_calibrations') and self.marker_distance_calibrations:
+                calibration_data = self.marker_distance_calibrations
+                print(f"キャリブレーションデータを内部データから取得: {len(calibration_data)} マーカー")
+            else:
+                # Fallback: load from JSON file
+                calibration_data = self.load_calibration_data_from_json()
+                print(f"キャリブレーションデータをJSONから取得: {len(calibration_data)} マーカー")
+
             # Get selected marker
             selected_text = self.graph_marker_combo.currentText()
             self.calibration_graph_widget.set_selected_marker(selected_text)
 
             # Pass calibration data
-            if hasattr(self, 'marker_distance_calibrations'):
-                self.calibration_graph_widget.set_calibration_data(self.marker_distance_calibrations)
+            if calibration_data:
+                self.calibration_graph_widget.set_calibration_data(calibration_data)
+                print(f"キャリブレーショングラフを更新: {len(calibration_data)} マーカーのデータを表示")
+            else:
+                print("キャリブレーションデータが見つかりません")
 
             # Update text display
             self.update_calibration_data_display()
+
+    def load_calibration_data_from_json(self):
+        """Load calibration data directly from marker_calibrations.json"""
+        try:
+            calib_file = 'marker_calibrations.json'
+            if not os.path.exists(calib_file):
+                print("marker_calibrations.jsonファイルが存在しません")
+                return {}
+
+            with open(calib_file, 'r', encoding='utf-8') as f:
+                import_data = json.load(f)
+
+            # Check for unified format (version 2.0)
+            if 'distance_calibrations' in import_data:
+                calibration_data = {}
+                print(f"JSON内のdistance_calibrations: {import_data['distance_calibrations']}")
+
+                for marker_id_str, calib_list in import_data['distance_calibrations'].items():
+                    marker_id = int(marker_id_str)
+                    print(f"マーカー {marker_id}: {calib_list}")
+
+                    # Filter out empty dictionaries and ensure complete data
+                    valid_calibrations = []
+                    for calib in calib_list:
+                        print(f"キャリブレーションエントリ検査: {calib}")
+
+                        if isinstance(calib, dict):
+                            missing_keys = [key for key in ['distance', 'size', 'x', 'y'] if key not in calib or calib[key] is None]
+                            if missing_keys:
+                                print(f"不完全なデータ - 欠損キー: {missing_keys}")
+                            else:
+                                valid_calibrations.append(calib)
+                                print(f"有効なキャリブレーションデータ: {calib}")
+                        else:
+                            print(f"無効なデータ型: {type(calib)}")
+
+                    if valid_calibrations:
+                        calibration_data[marker_id] = valid_calibrations
+                        print(f"マーカー {marker_id}: {len(valid_calibrations)} 個の有効なキャリブレーション")
+
+                print(f"統合形式からキャリブレーションデータを読み込み: {len(calibration_data)} マーカー")
+                return calibration_data
+
+            # Check for old format (version 1.0)
+            elif 'markers' in import_data:
+                calibration_data = {}
+                for marker_id_str, calib_list in import_data['markers'].items():
+                    marker_id = int(marker_id_str)
+                    # Filter out empty dictionaries and ensure complete data
+                    valid_calibrations = []
+                    for calib in calib_list:
+                        if (isinstance(calib, dict) and
+                            all(key in calib and calib[key] is not None for key in ['distance', 'size', 'x', 'y'])):
+                            valid_calibrations.append(calib)
+                    if valid_calibrations:
+                        calibration_data[marker_id] = valid_calibrations
+
+                print(f"旧形式からキャリブレーションデータを読み込み: {len(calibration_data)} マーカー")
+                return calibration_data
+
+            else:
+                print("不明なJSONファイル形式です")
+                return {}
+
+        except json.JSONDecodeError as e:
+            print(f"JSONファイルの解析エラー: {e}")
+            return {}
+        except Exception as e:
+            print(f"キャリブレーションデータの読み込みエラー: {e}")
+            return {}
 
     def update_calibration_data_display(self):
         """Update calibration data text display"""
@@ -1888,11 +2499,11 @@ class TelemetryApp(QMainWindow):
         # Update calibration display
         self.update_calibration_display()
 
-        # Load marker calibrations
+        # Load all marker calibrations (unified method)
         self.load_marker_calibrations()
 
-        # Load marker distance calibrations
-        self.load_marker_distance_calibrations()
+        # The unified method now handles both angle and distance calibrations
+        # No need to call load_marker_distance_calibrations separately
 
     def _init_pid_controllers(self):
         gains = self.current_pid_gains
@@ -2171,15 +2782,19 @@ class TelemetryApp(QMainWindow):
             self.current_position['x'] = -dx  # Negative because camera view is inverted
             self.current_position['y'] = distance  # Distance from runway
 
-            # 高度データの取得とデバッグ
+            # 高度データの取得とバンク角補正
             raw_alt = self.latest_attitude.get('alt', 0)
-            self.current_position['z'] = raw_alt / 1000.0  # Convert mm to m
+            current_roll = self.latest_attitude.get('roll', 0)
+            corrected_alt = self.get_corrected_altitude(raw_alt, current_roll)
+            self.current_position['z'] = corrected_alt / 1000.0  # Convert mm to m
 
         else:
             # Use other markers for positioning (simplified)
             self.current_position['y'] = distance
             raw_alt = self.latest_attitude.get('alt', 0)
-            self.current_position['z'] = raw_alt / 1000.0
+            current_roll = self.latest_attitude.get('roll', 0)
+            corrected_alt = self.get_corrected_altitude(raw_alt, current_roll)
+            self.current_position['z'] = corrected_alt / 1000.0
 
         # Update position visualization
         if hasattr(self, 'xy_position_widget') and hasattr(self, 'zy_position_widget'):
@@ -2210,9 +2825,11 @@ class TelemetryApp(QMainWindow):
 
         # Update altitude debug info
         if hasattr(self, 'altitude_debug_label'):
-            current_alt_mm = self.latest_attitude.get('alt', 0)
+            current_alt_mm_raw = self.latest_attitude.get('alt', 0)
+            current_roll = self.latest_attitude.get('roll', 0)
+            current_alt_mm = self.get_corrected_altitude(current_alt_mm_raw, current_roll)
             current_alt_m = current_alt_mm / 1000.0
-            self.altitude_debug_label.setText(f"高度: {current_alt_m:.2f} m ({current_alt_mm:.0f} mm)")
+            self.altitude_debug_label.setText(f"高度: {current_alt_m:.2f} m ({current_alt_mm:.0f} mm補正済)")
 
         if not self.auto_landing_enabled:
             self.auto_landing_phase = 0  # Manual
@@ -2250,8 +2867,10 @@ class TelemetryApp(QMainWindow):
         if not self.auto_landing_enabled or not self.is_connected:
             return
 
-        current_alt = self.latest_attitude.get('alt', 0) / 1000.0  # Convert mm to m
+        raw_alt = self.latest_attitude.get('alt', 0)
         current_roll = self.latest_attitude.get('roll', 0)
+        corrected_alt = self.get_corrected_altitude(raw_alt, current_roll)
+        current_alt = corrected_alt / 1000.0  # Convert mm to m
         current_pitch = self.latest_attitude.get('pitch', 0)
         current_yaw = self.latest_attitude.get('yaw', 0)
 
@@ -2327,7 +2946,12 @@ class TelemetryApp(QMainWindow):
         throttle_rc = int(target_throttle)
 
         # Send commands
-        commands = [aileron_rc, elevator_rc, rudder_rc, throttle_rc]
+        commands = {
+            'ail': aileron_rc,
+            'elev': elevator_rc,
+            'rudd': rudder_rc,
+            'thro': throttle_rc
+        }
         self.send_serial_command(commands)
 
         # Update auto landing stick displays
@@ -2383,7 +3007,7 @@ class TelemetryApp(QMainWindow):
         aux_group = QGroupBox("AUXスイッチ")
         aux_layout = QHBoxLayout()
         self.aux_labels = []
-        for i in range(1, 5):
+        for i in range(1, 6):  # AUX1からAUX5まで（5つ）
             label = QLabel(f"AUX{i}: OFF")
             label.setAlignment(Qt.AlignCenter)
             label.setStyleSheet("background-color: #555; color: white; padding: 5px; border-radius: 3px;")
@@ -2602,20 +3226,85 @@ class TelemetryApp(QMainWindow):
     def parse_and_update_ui(self, line):
         try:
             parts = [float(p) for p in line.split(',')]
-            if len(parts) == 24:  # 24パラメータに対応
+            if len(parts) == 25:  # 25パラメータに対応
                 # パラメータ1-4: 姿勢・高度データ
                 roll, pitch, yaw, alt = parts[0:4]
 
                 # パラメータ5-8: プロポ入力データ（送信側順序に対応）
                 ail, elev, thro, rudd = parts[4:8]
 
-                # パラメータ9-12: AUXスイッチ
-                aux1, aux2, aux3, aux4 = parts[8:12]
+                # Handle input log replay - must be before regular processing
+                if self.input_log_replaying and self.loaded_input_log:
+                    current_time = time.time() - self.input_log_replay_start_time
 
-                # パラメータ13-24: ArUcoマーカー情報
-                aruco1_size, aruco1_id, aruco1_x, aruco1_y = parts[12:16]
-                aruco2_size, aruco2_id, aruco2_x, aruco2_y = parts[16:20]
-                aruco3_size, aruco3_id, aruco3_x, aruco3_y = parts[20:24]
+                    # Find the current data point to apply (0.1秒間隔データの適用)
+                    current_data = None
+                    for i, data in enumerate(self.loaded_input_log):
+                        if data['timestamp'] <= current_time:
+                            current_data = data
+                            self.input_log_replay_index = i + 1
+                        else:
+                            break
+
+                    # Apply current replay data if available
+                    if current_data:
+                        # Apply replay input data (replace parsed RC input values)
+                        ail = float(current_data['ail'])    # Aileron
+                        elev = float(current_data['elev'])  # Elevator
+                        thro = float(current_data['thro'])  # Throttle
+                        rudd = float(current_data['rudd'])  # Rudder
+
+                        # Apply AUX1 if available in replay data
+                        if 'aux1' in current_data and len(parts) > 8:
+                            parts[8] = float(current_data['aux1'])  # AUX1
+
+                        # デバッグ出力は0.1秒ごと（データが更新された時のみ）
+                        if not hasattr(self, '_last_replay_data') or self._last_replay_data != current_data:
+                            print(f"Replay: A:{ail:.0f}, E:{elev:.0f}, T:{thro:.0f}, R:{rudd:.0f}, AUX1:{current_data.get('aux1', 'N/A')}, Time:{current_time:.1f}s")
+                            self._last_replay_data = current_data
+
+                    # Check if replay is complete (time-based)
+                    if (self.loaded_input_log and
+                        current_time >= self.loaded_input_log[-1]['timestamp']):
+                        self.input_log_replaying = False
+
+                        # Stop mission when replay is complete
+                        self.stop_mission()
+
+                        self.replay_button.setText("ログ再現飛行開始")
+                        self.replay_button.setStyleSheet("")
+                        self.replay_status_label.setText("再現完了")
+                        self.replay_status_label.setStyleSheet("color: #28a745; font-weight: bold;")
+                        print("ログ再現飛行が完了しました (ミッション停止)")
+
+                # プロポ入力ログ記録（0.1秒間隔）
+                if self.input_log_recording:
+                    current_time = time.time()
+                    if self.input_log_start_time == 0:
+                        self.input_log_start_time = current_time
+                        self.input_log_last_record_time = current_time
+
+                    # 0.1秒経過した場合のみ記録
+                    if current_time - self.input_log_last_record_time >= 0.1:
+                        timestamp = current_time - self.input_log_start_time
+                        log_entry = {
+                            'timestamp': timestamp,
+                            'ail': ail,
+                            'elev': elev,
+                            'thro': thro,
+                            'rudd': rudd,
+                            'aux1': parts[8] if len(parts) > 8 else '1000'
+                        }
+                        self.input_log_data.append(log_entry)
+                        self.input_log_last_record_time = current_time
+
+                # パラメータ9-13: AUXスイッチ（AUX5追加）
+                aux1, aux2, aux3, aux4, aux5 = parts[8:13]
+
+                # パラメータ14-25: ArUcoマーカー情報
+                aruco1_size, aruco1_id, aruco1_x, aruco1_y = parts[13:17]
+                aruco2_size, aruco2_id, aruco2_x, aruco2_y = parts[17:21]
+                aruco3_size, aruco3_id, aruco3_x, aruco3_y = parts[21:25]
 
                 # ArUcoマーカー情報を保存
                 self.aruco_markers[1] = {'size': aruco1_size, 'id': int(aruco1_id), 'x': aruco1_x, 'y': aruco1_y}
@@ -2665,10 +3354,15 @@ class TelemetryApp(QMainWindow):
 
                 self.latest_attitude = {'roll': roll, 'pitch': pitch, 'yaw': yaw, 'alt': filtered_alt}
 
+                # 高度計には補正済み高度を表示
+                corrected_alt = self.get_corrected_altitude(filtered_alt, roll)
                 self.adi_widget.set_attitude(roll, pitch)
-                self.altimeter_widget.set_altitude(filtered_alt)
+                self.altimeter_widget.set_altitude(corrected_alt)
                 self.heading_label.setText(f"方位: {yaw:.1f} °")
-                self.update_aux_switches([aux1, aux2, aux3, aux4])
+                self.update_aux_switches([aux1, aux2, aux3, aux4, aux5])
+
+                # Update input replay tab displays
+                self.update_input_replay_displays(ail, elev, thro, rudd, aux1)
 
                 rud_norm = self.normalize_symmetrical(rudd, **self.RC_RANGES['rudd'])
                 ele_norm = self.normalize_symmetrical(elev, **self.RC_RANGES['elev'])
@@ -2685,9 +3379,9 @@ class TelemetryApp(QMainWindow):
                 # スティックウィジェットに自動操縦状態を設定
                 self.left_stick.set_autopilot_active(self.autopilot_active)
                 self.right_stick.set_autopilot_active(self.autopilot_active)
-                self.check_mission_triggers([aux1, aux2, aux3, aux4])
+                self.check_mission_triggers([aux1, aux2, aux3, aux4, aux5])
             else:
-                print(f"データ形式エラー: 24パラメータが必要ですが、{len(parts)}パラメータを受信しました - {line}")
+                print(f"データ形式エラー: 25パラメータが必要ですが、{len(parts)}パラメータを受信しました - {line}")
         except (ValueError, IndexError) as e:
             print(f"データ解析エラー: {e} - {line}")
 
@@ -2696,28 +3390,23 @@ class TelemetryApp(QMainWindow):
         off_style = "background-color: #555; color: white; padding: 5px; border-radius: 3px;"
 
         mission_text = "なし"
-        missions = { 2: "水平旋回", 3: "上昇旋回", 4: "八の字旋回" } # AUX switch number to mission name
+        missions = { 2: "水平旋回", 3: "上昇旋回", 4: "八の字旋回", 5: "自動離着陸" } # AUX switch number to mission name
 
         for i, value in enumerate(aux_values):
-            label = self.aux_labels[i]
-            is_on = value > 1100
-            aux_number = i + 1  # AUX1, AUX2, AUX3, AUX4
+            if i < len(self.aux_labels):  # 既存のAUXラベル数に制限
+                label = self.aux_labels[i]
+                is_on = float(value) > 1100
+                aux_number = i + 1  # AUX1, AUX2, AUX3, AUX4, AUX5
 
-            if is_on:
-                if aux_number == 1:
-                    label.setText(f"AUX1: ON")
-                else:
+                if is_on:
                     label.setText(f"AUX{aux_number}: ON")
-                label.setStyleSheet(on_style)
-                # Check if this AUX is assigned to a mission
-                if aux_number in missions:
-                    mission_text = missions[aux_number]
-            else:
-                if aux_number == 1:
-                    label.setText(f"AUX1: OFF")
+                    label.setStyleSheet(on_style)
+                    # Check if this AUX is assigned to a mission
+                    if aux_number in missions:
+                        mission_text = missions[aux_number]
                 else:
                     label.setText(f"AUX{aux_number}: OFF")
-                label.setStyleSheet(off_style)
+                    label.setStyleSheet(off_style)
 
         self.mission_status_label.setText(f"ミッション: {mission_text}")
 
@@ -2727,20 +3416,44 @@ class TelemetryApp(QMainWindow):
         # AUX2: 水平旋回（Mission 1）
         # AUX3: 上昇旋回（Mission 2）
         # AUX4: 八の字旋回（Mission 3）
+        # AUX5: 自動離着陸（Auto Landing）
         mission_map = {
             2: 1, # AUX2 -> Mission 1 (水平旋回)
             3: 2, # AUX3 -> Mission 2 (上昇旋回)
             4: 3  # AUX4 -> Mission 3 (八の字旋回)
         }
 
+        # AUX5の自動離着陸チェック（最優先）
+        if len(aux_values) >= 5 and float(aux_values[4]) > 1100:  # AUX5がON
+            if not self.auto_landing_enabled:
+                # 自動離着陸を有効化
+                self.auto_landing_enabled = True
+                if hasattr(self, 'auto_landing_enable_button'):
+                    self.auto_landing_enable_button.setChecked(True)
+                    self.auto_landing_enable_button.setText("自動離着陸無効化")
+                print("AUX5により自動離着陸が有効化されました")
+                # Update replay button state when AUX5 is enabled
+                self.update_replay_button_state()
+        else:
+            if self.auto_landing_enabled:
+                # 自動離着陸を無効化
+                self.auto_landing_enabled = False
+                if hasattr(self, 'auto_landing_enable_button'):
+                    self.auto_landing_enable_button.setChecked(False)
+                    self.auto_landing_enable_button.setText("自動離着陸有効化")
+                print("AUX5により自動離着陸が無効化されました")
+                # Update replay button state when AUX5 is disabled
+                self.update_replay_button_state()
+
+        # 既存のミッション処理（AUX2-4）
         mission_found = False
         # Prioritize lower AUX numbers if multiple are on
         for aux_number in sorted(mission_map.keys()):
             aux_index = aux_number - 1
-            if aux_values[aux_index] > 1100: # If this mission switch is ON
+            if aux_index < len(aux_values) and float(aux_values[aux_index]) > 1100: # If this mission switch is ON
                 mission_found = True
-                prev_val = self.previous_aux_values[aux_index]
-                if prev_val < 1100: # And it was previously OFF (rising edge)
+                prev_val = self.previous_aux_values[aux_index] if aux_index < len(self.previous_aux_values) else 0
+                if float(prev_val) < 1100: # And it was previously OFF (rising edge)
                     # 新ミッション開始時に回転角をリセット
                     self.mission_total_rotation = 0.0
                     self.start_mission(mission_map[aux_number])
@@ -2749,7 +3462,8 @@ class TelemetryApp(QMainWindow):
         if not mission_found:
             self.stop_mission()
 
-        self.previous_aux_values = list(aux_values)
+        # previous_aux_valuesをaux_valuesの長さに合わせて更新（数値として保存）
+        self.previous_aux_values = [float(val) for val in aux_values]
 
     def start_mission(self, mission_mode):
         if self.autopilot_active and self.active_mission_mode == mission_mode:
@@ -2758,7 +3472,9 @@ class TelemetryApp(QMainWindow):
         self.autopilot_active = True
         self.active_mission_mode = mission_mode
         self.mission_start_yaw = self.latest_attitude.get('yaw', 0)
-        self.mission_start_altitude = self.latest_attitude.get('alt', 0)
+        raw_alt = self.latest_attitude.get('alt', 0)
+        current_roll = self.latest_attitude.get('roll', 0)
+        self.mission_start_altitude = self.get_corrected_altitude(raw_alt, current_roll)
         # 新しいヨー角追跡システムの初期化
         self.previous_yaw = self.mission_start_yaw
         self.mission_total_rotation = 0.0
@@ -2805,7 +3521,10 @@ class TelemetryApp(QMainWindow):
                 self.send_serial_command(self.last_autopilot_commands)
             return
 
-        current_alt = self.latest_attitude.get('alt', self.mission_start_altitude)
+        raw_alt = self.latest_attitude.get('alt', self.mission_start_altitude)
+        current_roll = self.latest_attitude.get('roll', 0)
+        corrected_alt = self.get_corrected_altitude(raw_alt, current_roll)
+        current_alt = corrected_alt
         current_roll = self.latest_attitude.get('roll', 0)
         current_pitch = self.latest_attitude.get('pitch', 0)
         current_yaw = self.latest_attitude.get('yaw', 0)
@@ -2882,20 +3601,22 @@ class TelemetryApp(QMainWindow):
                 elif self.ascending_phase == 1:  # フェーズ1: 旋回しながら5mまで上昇
                     # フェーズ1のデバッグ出力（5秒間隔）
                     if self.yaw_debug_counter % 100 == 0:  # 50ms * 100 = 5秒間隔
-                        print(f"上昇旋回フェーズ1: 高度={current_alt_m:.2f}m, 総回転={self.mission_total_rotation:.1f}°, 目標高度=5.0m")
+                        print(f"上昇旋回フェーズ1: 高度={current_alt_m:.2f}m, 総回転={self.mission_total_rotation:.1f}°, 目標高度=7.5m")
 
-                    # 高度に応じて目標を調整（2.5m→5m）
-                    if current_alt_m < 5.0:
-                        target_altitude = 5.0  # 上昇目標
+                    # 高度に応じて目標を調整（2.5m→7.5m）
+                    altitude_high = float(self.current_autopilot_params.get('altitude_high', 7.5))
+                    if current_alt_m < altitude_high:
+                        target_altitude = altitude_high  # 上昇目標
                     else:
-                        # 5m到達で次フェーズに移行
+                        # 7.5m到達で次フェーズに移行
                         self.ascending_phase = 2
                         self.ascending_phase_start_rotation = self.mission_total_rotation
-                        print(f"上昇旋回: 5m到達→5m水平旋回開始 (総回転角={self.mission_total_rotation:.1f}°)")
-                        target_altitude = 5.0
+                        print(f"上昇旋回: 7.5m到達→7.5m水平旋回開始 (総回転角={self.mission_total_rotation:.1f}°)")
+                        target_altitude = altitude_high
 
-                elif self.ascending_phase == 2:  # フェーズ2: 5m高度で左旋回2回（-720度）
-                    target_altitude = 5.0  # 5m維持
+                elif self.ascending_phase == 2:  # フェーズ2: 7.5m高度で左旋回2回（-720度）
+                    altitude_high = float(self.current_autopilot_params.get('altitude_high', 7.5))
+                    target_altitude = altitude_high  # 高度維持
                     phase_rotation = self.mission_total_rotation - self.ascending_phase_start_rotation
 
                     # フェーズ2のデバッグ出力（5秒間隔）
@@ -2907,8 +3628,8 @@ class TelemetryApp(QMainWindow):
                         print(f"上昇旋回完了: 開始角={self.mission_start_yaw:.1f}°, 現在角={current_yaw:.1f}°, 総回転角={self.mission_total_rotation:.1f}°")
                         self.mission_status_label.setText("ミッション: 上昇旋回 成功")
             else:
-                # ミッション完了後は5m高度維持
-                target_altitude = 5.0
+                # ミッション完了後は8m高度維持
+                target_altitude = 8.0
                 target_roll = 0
         elif self.active_mission_mode == 3: # Figure-8 Turn (右旋回→左旋回)
             # 八の字旋回：右旋回から入り、目標角到達で左バンクに切り替え
@@ -2970,16 +3691,24 @@ class TelemetryApp(QMainWindow):
                     target_throttle = max(throttle_min, min(target_throttle, throttle_max))
                     target_throttle = int(target_throttle)
             elif self.ascending_phase == 1:  # フェーズ1: 上昇中
-                altitude_error_m = 5.0 - current_alt_m
+                # 上昇時は専用のスロットル基準を使用
+                ascending_throttle_base = float(self.current_autopilot_params.get('ascending_throttle_base', 800.0))
+                altitude_high = float(self.current_autopilot_params.get('altitude_high', 7.5))
+                altitude_error_m = altitude_high - current_alt_m
                 throttle_adjustment = altitude_error_m * altitude_gain
-                target_throttle = base_throttle + throttle_adjustment
+                target_throttle = ascending_throttle_base + throttle_adjustment
                 target_throttle = max(throttle_min, min(target_throttle, throttle_max))
                 target_throttle = int(target_throttle)
-            else:  # フェーズ2: 5m維持, またはミッション完了
-                if abs(current_alt_m - 5.0) < 0.1:  # 5m付近では一定スロットル
+
+                # 上昇時のピッチオフセットを適用（頭上げ）
+                ascending_pitch_offset = self.current_autopilot_params.get('ascending_pitch_offset', 5.0)
+                target_pitch += ascending_pitch_offset
+            else:  # フェーズ2: 高度維持, またはミッション完了
+                altitude_high = float(self.current_autopilot_params.get('altitude_high', 7.5))
+                if abs(current_alt_m - altitude_high) < 0.1:  # 目標高度付近では一定スロットル
                     target_throttle = base_throttle
                 else:
-                    altitude_error_m = 5.0 - current_alt_m
+                    altitude_error_m = altitude_high - current_alt_m
                     throttle_adjustment = altitude_error_m * altitude_gain
                     target_throttle = base_throttle + throttle_adjustment
                     target_throttle = max(throttle_min, min(target_throttle, throttle_max))

@@ -1,3 +1,0 @@
-marker_1_offset_angle=0.0
-marker_2_offset_angle=0.0
-marker_3_offset_angle=0.0
