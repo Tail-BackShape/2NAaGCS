@@ -429,12 +429,12 @@ class FlightStateGraphWidget(QWidget):
             self.clear_plots()
             return
 
-        # Check if this is just a replay time update without new data
-        if (hasattr(self, 'log_data') and self.log_data == log_data and
-            replay_time is not None):
-            # Only update replay time indicator, don't redraw entire plots
-            self._update_replay_indicator(replay_time)
-            return
+        # リアルタイムオーバーレイは不安定動作の元なので無効化
+        # if (hasattr(self, 'log_data') and self.log_data == log_data and
+        #     replay_time is not None):
+        #     # Only update replay time indicator, don't redraw entire plots
+        #     self._update_replay_indicator(replay_time)
+        #     return
 
         self.log_data = log_data
 
@@ -520,43 +520,9 @@ class FlightStateGraphWidget(QWidget):
         self.canvas.draw()
 
     def _update_replay_indicator(self, replay_time):
-        """Efficiently update only the replay time indicator"""
-        if not hasattr(self, 'log_data') or not self.log_data:
-            return
-
-        times = [point['elapsed_time'] for point in self.log_data]
-        if not times:
-            return
-
-        # Remove previous replay indicators
-        for ax in [self.ax1, self.ax2, self.ax3, self.ax4]:
-            # Remove existing replay time lines and text
-            lines_to_remove = []
-            texts_to_remove = []
-            for line in ax.lines:
-                if hasattr(line, '_replay_indicator') and line._replay_indicator:
-                    lines_to_remove.append(line)
-            for text in ax.texts:
-                if hasattr(text, '_replay_indicator') and text._replay_indicator:
-                    texts_to_remove.append(text)
-
-            for line in lines_to_remove:
-                line.remove()
-            for text in texts_to_remove:
-                text.remove()
-
-            # Add new replay time indicator
-            vline = ax.axvline(x=replay_time, color='red', linestyle='--', linewidth=2, alpha=0.8)
-            vline._replay_indicator = True  # Mark for future removal
-
-            y_pos = ax.get_ylim()[1] * 0.9
-            text = ax.text(replay_time, y_pos, f'Replay: {replay_time:.1f}s',
-                          rotation=90, color='red', fontweight='bold',
-                          verticalalignment='top', horizontalalignment='right')
-            text._replay_indicator = True  # Mark for future removal
-
-        # Only redraw the canvas, no layout adjustment needed
-        self.canvas.draw_idle()
+        """リアルタイムオーバーレイは不安定動作の元なので無効化"""
+        # この機能は無効化されています
+        pass
 
 # --- Position Visualization Widgets for Auto Landing ---
 class PositionVisualizationWidget(QWidget):
@@ -719,13 +685,17 @@ class PositionVisualizationWidget(QWidget):
                 # Draw marker ID and position info with units
                 painter.setPen(QPen(QColor("white"), 1))
                 if self.view_type == "XY":
-                    marker_info = f"ID{marker_id}\n({marker['x']:.1f}m, {marker['y']:.1f}m)"
-                    if is_detected:
-                        marker_info += f"\nサイズ: {marker.get('size', 0):.0f}px"
+                        marker_info = f"ID{marker_id}\n({marker['x']:.1f}m, {marker['y']:.1f}m)"
+                        if is_detected:
+                            marker_info += f"\nサイズ: {marker.get('size', 0):.0f}px"
+                            marker_info += f"\n画像X: {marker.get('image_x', 0):.0f}"
+                            marker_info += f"\n画像Y: {marker.get('image_y', 0):.0f}"
                 else:
-                    marker_info = f"ID{marker_id}\n({marker['y']:.1f}m, {marker.get('z', 0):.1f}m)"
-                    if is_detected:
-                        marker_info += f"\nサイズ: {marker.get('size', 0):.0f}px"
+                        marker_info = f"ID{marker_id}\n({marker['y']:.1f}m, {marker.get('z', 0):.1f}m)"
+                        if is_detected:
+                            marker_info += f"\nサイズ: {marker.get('size', 0):.0f}px"
+                            marker_info += f"\n画像X: {marker.get('image_x', 0):.0f}"
+                            marker_info += f"\n画像Y: {marker.get('image_y', 0):.0f}"
 
                 painter.drawText(marker_x + marker_size/2 + 5, marker_y - marker_size/2, marker_info)
 
@@ -1018,7 +988,8 @@ class TelemetryApp(QMainWindow):
 
     # 自動離着陸パラメータ
     AUTO_LANDING_PARAMS = [
-        ("離陸スロットル", "takeoff_throttle", "1000.0"),
+    ("離陸スロットル", "takeoff_throttle", "1000.0"),
+    ("離陸エレベータオフセット (度)", "takeoff_elevator_offset", "0.0"),
         ("投下前標準スロットル", "pre_drop_throttle", "700.0"),
         ("投下後標準スロットル", "post_drop_throttle", "650.0"),
         ("定常飛行高度 (m)", "steady_altitude", "1.5"),
@@ -3258,6 +3229,9 @@ class TelemetryApp(QMainWindow):
             steady_alt = self.auto_landing_params.get('steady_altitude', 1.5)
             if current_alt < steady_alt:
                 target_pitch = 5.0  # Nose up for climb
+            # エレベータオフセットを加算
+            elevator_offset = self.auto_landing_params.get('takeoff_elevator_offset', 0.0)
+            target_pitch += elevator_offset
 
         elif self.auto_landing_phase == 2:  # Drop phase
             target_throttle = self.auto_landing_params.get('pre_drop_throttle', 700.0)
@@ -3285,7 +3259,7 @@ class TelemetryApp(QMainWindow):
                 target_rudder = max(-1.0, min(1.0, target_rudder))
 
         elif self.auto_landing_phase == 4:  # Landing phase
-            target_throttle = self.auto_landing_params.get('post_drop_throttle', 650.0) * 0.8  # Reduce throttle
+            target_throttle = 0  # 着陸フェーズではスロットル0を送信
             # Gentle descent
             target_pitch = -2.0  # Slight nose down
 
@@ -3299,7 +3273,10 @@ class TelemetryApp(QMainWindow):
                 target_rudder = max(-1.0, min(1.0, target_rudder))
 
         # Apply control limits
-        target_throttle = max(400, min(1000, int(target_throttle)))
+        if self.auto_landing_phase == 4:  # Landing phase: allow throttle 0
+            target_throttle = max(0, min(1000, int(target_throttle)))
+        else:
+            target_throttle = max(400, min(1000, int(target_throttle)))
         target_roll = max(-30, min(30, target_roll))
         target_pitch = max(-15, min(15, target_pitch))
 
@@ -3319,12 +3296,12 @@ class TelemetryApp(QMainWindow):
 
         # Send commands & print for debug
         commands = {
-            'ail': aileron_rc,
-            'elev': elevator_rc,
-            'rudd': rudder_rc,
-            'thro': throttle_rc
+            'ail': int(round(aileron_rc)),
+            'elev': int(round(elevator_rc)),
+            'rudd': int(round(rudder_rc)),
+            'thro': int(round(throttle_rc))
         }
-        print(f"[自動離着陸操縦量] AIL={aileron_rc}, ELEV={elevator_rc}, RUDD={rudder_rc}, THRO={throttle_rc}")
+        # print(f"[自動離着陸操縦量] AIL={commands['ail']}, ELEV={commands['elev']}, RUDD={commands['rudd']}, THRO={commands['thro']}")
         self.send_serial_command(commands)
 
         # Update auto landing stick displays with actual sent RC values
@@ -3669,6 +3646,7 @@ class TelemetryApp(QMainWindow):
                     if self.is_connected:
                         self.toggle_connection()
                 elif isinstance(item, str):
+                    # print(f"[SERIAL DEBUG] 受信: {item}")
                     self.parse_and_update_ui(item)
         except queue.Empty:
             pass
@@ -3846,9 +3824,9 @@ class TelemetryApp(QMainWindow):
                         # ログ再現飛行中は制御コマンドを生成したので、後続の処理は継続
                         # return を削除して通常の処理を継続
 
-                    # Always update flight state graph with current replay time indicator during replay
-                    if hasattr(self, 'flight_state_graph') and self.loaded_input_log:
-                        self.flight_state_graph.update_plots(self.loaded_input_log, replay_time=current_time)
+                    # リアルタイムオーバーレイは不安定動作の元なので無効化
+                    # if hasattr(self, 'flight_state_graph') and self.loaded_input_log:
+                    #     self.flight_state_graph.update_plots(self.loaded_input_log, replay_time=current_time)
 
                     # Check if replay is complete (time-based)
                     if (self.loaded_input_log and
@@ -3914,28 +3892,34 @@ class TelemetryApp(QMainWindow):
                 aruco2_size, aruco2_id, aruco2_x, aruco2_y = parts[17:21]
                 aruco3_size, aruco3_id, aruco3_x, aruco3_y = parts[21:25]
 
-                # ArUcoマーカー情報を保存（既存のimage_x, image_yを保持）
-                for marker_id, size, id_val, x, y in [(1, aruco1_size, aruco1_id, aruco1_x, aruco1_y),
-                                                       (2, aruco2_size, aruco2_id, aruco2_x, aruco2_y),
-                                                       (3, aruco3_size, aruco3_id, aruco3_x, aruco3_y)]:
+                # ArUcoマーカー情報を保存（x, yはカメラ画像座標として処理）
+                for marker_id, size, id_val, image_x, image_y in [(1, aruco1_size, aruco1_id, aruco1_x, aruco1_y),
+                                                                   (2, aruco2_size, aruco2_id, aruco2_x, aruco2_y),
+                                                                   (3, aruco3_size, aruco3_id, aruco3_x, aruco3_y)]:
                     if marker_id not in self.aruco_markers:
                         self.aruco_markers[marker_id] = {}
 
-                    # Update with new data while preserving image coordinates
+                    # Update with new data - x,y are image coordinates from camera
                     self.aruco_markers[marker_id].update({
                         'size': float(size),
                         'id': int(id_val),
-                        'x': float(x),
-                        'y': float(y),
-                        'image_x': self.aruco_markers[marker_id].get('image_x', 0),
-                        'image_y': self.aruco_markers[marker_id].get('image_y', 0),
+                        'image_x': float(image_x),  # カメラ画像のX座標
+                        'image_y': float(image_y),  # カメラ画像のY座標
                         'detected': float(size) > 0
                     })
+
+                    # フィールド座標は既存の設定値を保持
+                    if 'x' not in self.aruco_markers[marker_id]:
+                        self.aruco_markers[marker_id]['x'] = 0.0
+                    if 'y' not in self.aruco_markers[marker_id]:
+                        self.aruco_markers[marker_id]['y'] = 0.0
+                    if 'z' not in self.aruco_markers[marker_id]:
+                        self.aruco_markers[marker_id]['z'] = 0.0
 
                 # リアルタイムマーカーデータ更新
                 self.update_marker_realtime_display()
 
-                # Position visualization widgets にマーカーデータを更新
+                # Position visualization widgets にマーカーデータを更新（カメラ画像座標として）
                 self.xy_position_widget.update_marker_data(1, aruco1_size, aruco1_x, aruco1_y)
                 self.xy_position_widget.update_marker_data(2, aruco2_size, aruco2_x, aruco2_y)
                 self.xy_position_widget.update_marker_data(3, aruco3_size, aruco3_x, aruco3_y)
@@ -4124,7 +4108,6 @@ class TelemetryApp(QMainWindow):
                 print("AUX5スイッチがONになりました")
             else:
                 print("AUX5スイッチがOFFになりました")
-                # AUX5がOFFになった場合、即座に全ての自動機能を停止
 
                 # 1. 自動離着陸を無効化
                 if self.auto_landing_enabled:
@@ -4134,16 +4117,23 @@ class TelemetryApp(QMainWindow):
                         self.auto_landing_enable_button.setText("自動離着陸有効化")
                     print("AUX5がOFFのため自動離着陸が無効化されました")
 
-                # 2. アクティブなミッションを停止
-                if self.autopilot_active:
+                # 2. 自動離着陸ミッション（モード4）のみ停止、AUX2-4は継続
+                if self.autopilot_active and self.active_mission_mode == 4:
                     self.stop_mission()
+                    print("自動離着陸ミッションを停止しました")
 
-                # 3. 確実に手動状態に設定
-                self.autopilot_active = False
-                self.active_mission_mode = 0
-
-                # 4. 緊急手動復帰処理を実行
-                self.emergency_return_to_manual()
+                # 3. AUX2-4がすべてOFFの場合のみ手動状態に設定
+                aux2_4_active = any(
+                    i < len(aux_values) and float(aux_values[i]) > 1100
+                    for i in [1, 2, 3]  # AUX2, AUX3, AUX4のインデックス
+                )
+                if not aux2_4_active:
+                    if self.autopilot_active:
+                        self.stop_mission()
+                    self.autopilot_active = False
+                    self.active_mission_mode = 0
+                    self.emergency_return_to_manual()
+                    print("AUX5がOFFかつAUX2-4もすべてOFFのため手動操縦に戻りました")
             # Update replay button state when AUX5 state changes
             self.update_replay_button_state()
 
@@ -4158,8 +4148,8 @@ class TelemetryApp(QMainWindow):
                 self.record_auto_landing_log_data()
 
         # 既存のミッション処理（AUX2-4）
-        # 再現飛行中や自動離着陸が有効な場合は他のミッションを無視
-        if not (self.auto_landing_enabled and self.input_log_replaying) and not (self.aux5_enabled and self.auto_landing_enabled):
+        # AUX5の状態に関係なく、再現飛行中でない限りミッション実行可能
+        if not self.input_log_replaying:
             mission_found = False
             # Prioritize lower AUX numbers if multiple are on
             for aux_number in sorted(mission_map.keys()):
@@ -4170,11 +4160,19 @@ class TelemetryApp(QMainWindow):
                     if float(prev_val) < 1100: # And it was previously OFF (rising edge)
                         # 新ミッション開始時に回転角をリセット
                         self.mission_total_rotation = 0.0
+                        # 自動離着陸が有効な場合は自動離着陸を一時停止してミッション実行
+                        if self.auto_landing_enabled:
+                            print(f"AUX{aux_number}ミッション開始のため自動離着陸を一時停止します")
+                            self.auto_landing_enabled = False
                         self.start_mission(mission_map[aux_number])
+                        print(f"AUX{aux_number}スイッチによりミッション{mission_map[aux_number]}を開始しました（AUX5状態: {'ON' if self.aux5_enabled else 'OFF'}）")
                     break # Only handle one mission at a time
 
             if not mission_found:
-                self.stop_mission()
+                # AUX2-4のミッションがすべてOFFの場合
+                if self.autopilot_active and self.active_mission_mode in [1, 2, 3]:
+                    self.stop_mission()
+                    print("AUX2-4スイッチがすべてOFFのためミッションを停止しました")
 
         # previous_aux_valuesをaux_valuesの長さに合わせて更新（数値として保存）
         self.previous_aux_values = [float(val) for val in aux_values]
@@ -5075,10 +5073,10 @@ class TelemetryApp(QMainWindow):
 
             print(f"Auto landing replay: Alt={altitude_target}, Yaw={yaw_target:.1f}°, Thro={throttle_target}, AUX1={aux1_target}")
 
-        # Always update flight state graph with current replay time indicator during replay
-        if hasattr(self, 'flight_state_graph') and self.loaded_auto_landing_log:
-            elapsed_time = time.time() - self.auto_landing_log_replay_start_time
-            self.flight_state_graph.update_plots(self.loaded_auto_landing_log, replay_time=elapsed_time)
+        # リアルタイムオーバーレイは不安定動作の元なので無効化
+        # if hasattr(self, 'flight_state_graph') and self.loaded_auto_landing_log:
+        #     elapsed_time = time.time() - self.auto_landing_log_replay_start_time
+        #     self.flight_state_graph.update_plots(self.loaded_auto_landing_log, replay_time=elapsed_time)
 
     def update_auto_landing_log_interval(self, value):
         """Update auto landing log recording interval"""

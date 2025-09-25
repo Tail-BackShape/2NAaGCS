@@ -7,9 +7,10 @@
     "altitude_gain": 50.0,
     "rudder_gain": 0.5,
     "takeoff_distance_threshold": 4.0,
-    "drop_distance_threshold": 3.0,
-    "steady_distance_threshold": 2.0,
-    "landing_distance_threshold": 1.0
+    "drop_distance_threshold": 3.5,
+    "steady_distance_threshold": 3.2,
+    "landing_distance_threshold": 3.0,
+    "takeoff_elevator_offset": 10.0
   },
   "calibration": {
     "point1": {
