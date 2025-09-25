@@ -423,10 +423,17 @@ class FlightStateGraphWidget(QWidget):
         self.figure.tight_layout(pad=1.0)  # Reduced padding for better space usage
         self.canvas.draw()
 
-    def update_plots(self, log_data):
-        """Update plots with new log data"""
+    def update_plots(self, log_data, replay_time=None):
+        """Update plots with new log data and optional replay time indicator"""
         if not log_data:
             self.clear_plots()
+            return
+
+        # Check if this is just a replay time update without new data
+        if (hasattr(self, 'log_data') and self.log_data == log_data and
+            replay_time is not None):
+            # Only update replay time indicator, don't redraw entire plots
+            self._update_replay_indicator(replay_time)
             return
 
         self.log_data = log_data
@@ -497,9 +504,59 @@ class FlightStateGraphWidget(QWidget):
                     tick_interval = max(1, int(time_max / 10))  # About 10 ticks
                     ax.set_xticks(range(0, int(time_max) + tick_interval, tick_interval))
 
+        # Add replay time indicator if provided
+        if replay_time is not None and times:
+            for ax in [self.ax1, self.ax2, self.ax3, self.ax4]:
+                # Draw vertical line at current replay time
+                ax.axvline(x=replay_time, color='red', linestyle='--', linewidth=2, alpha=0.8, label='Replay Time')
+                # Add text annotation showing current time
+                y_pos = ax.get_ylim()[1] * 0.9  # Position at 90% of y-axis height
+                ax.text(replay_time, y_pos, f'Replay: {replay_time:.1f}s',
+                       rotation=90, color='red', fontweight='bold',
+                       verticalalignment='top', horizontalalignment='right')
+
         # Adjust layout and refresh
         self.figure.tight_layout(pad=2.0)
         self.canvas.draw()
+
+    def _update_replay_indicator(self, replay_time):
+        """Efficiently update only the replay time indicator"""
+        if not hasattr(self, 'log_data') or not self.log_data:
+            return
+
+        times = [point['elapsed_time'] for point in self.log_data]
+        if not times:
+            return
+
+        # Remove previous replay indicators
+        for ax in [self.ax1, self.ax2, self.ax3, self.ax4]:
+            # Remove existing replay time lines and text
+            lines_to_remove = []
+            texts_to_remove = []
+            for line in ax.lines:
+                if hasattr(line, '_replay_indicator') and line._replay_indicator:
+                    lines_to_remove.append(line)
+            for text in ax.texts:
+                if hasattr(text, '_replay_indicator') and text._replay_indicator:
+                    texts_to_remove.append(text)
+
+            for line in lines_to_remove:
+                line.remove()
+            for text in texts_to_remove:
+                text.remove()
+
+            # Add new replay time indicator
+            vline = ax.axvline(x=replay_time, color='red', linestyle='--', linewidth=2, alpha=0.8)
+            vline._replay_indicator = True  # Mark for future removal
+
+            y_pos = ax.get_ylim()[1] * 0.9
+            text = ax.text(replay_time, y_pos, f'Replay: {replay_time:.1f}s',
+                          rotation=90, color='red', fontweight='bold',
+                          verticalalignment='top', horizontalalignment='right')
+            text._replay_indicator = True  # Mark for future removal
+
+        # Only redraw the canvas, no layout adjustment needed
+        self.canvas.draw_idle()
 
 # --- Position Visualization Widgets for Auto Landing ---
 class PositionVisualizationWidget(QWidget):
@@ -2256,6 +2313,12 @@ class TelemetryApp(QMainWindow):
 
     def load_marker_calibrations(self):
         """Load all marker calibrations (angle + distance) from unified JSON file"""
+        # Initialize default structures first
+        if not hasattr(self, 'marker_calibrations'):
+            self.marker_calibrations = {1: {'offset_angle': 0.0}, 2: {'offset_angle': 0.0}, 3: {'offset_angle': 0.0}}
+        if not hasattr(self, 'marker_distance_calibrations'):
+            self.marker_distance_calibrations = {1: [], 2: [], 3: []}
+
         try:
             calib_file = 'marker_calibrations.json'
             print(f"Loading marker calibrations from {calib_file}")
@@ -2361,14 +2424,19 @@ class TelemetryApp(QMainWindow):
                                                     self.marker_calib_controls[marker_id][param].setText(str(value))
                     print("Angle calibrations loaded from old text format")
                 else:
-                    print(f"No unified calibration file found: {calib_file}")
+                    print(f"No calibration file found: {calib_file} - using default values")
+                    print(f"Default angle calibrations: {self.marker_calibrations}")
+                    print(f"Default distance calibrations initialized for markers: {list(self.marker_distance_calibrations.keys())}")
 
         except json.JSONDecodeError as e:
             print(f"Failed to parse JSON in marker calibrations file: {e}")
+            print("Using default calibration values")
         except FileNotFoundError as e:
             print(f"Marker calibrations file not found: {e}")
+            print("Using default calibration values")
         except Exception as e:
             print(f"Failed to load marker calibrations: {e}")
+            print("Using default calibration values")
             import traceback
             traceback.print_exc()
 
@@ -2401,12 +2469,16 @@ class TelemetryApp(QMainWindow):
             if marker_id not in self.marker_distance_calibrations:
                 self.marker_distance_calibrations[marker_id] = []
 
+            # Ensure image coordinates exist (fallback to 0 if not available)
+            image_x = self.aruco_markers[marker_id].get('image_x', 0)
+            image_y = self.aruco_markers[marker_id].get('image_y', 0)
+
             # Add new calibration point (using image coordinates from camera)
             calibration_point = {
                 'distance': distance,
                 'size': marker_size,
-                'x': self.aruco_markers[marker_id]['image_x'],  # Image coordinates (pixels)
-                'y': self.aruco_markers[marker_id]['image_y']   # Image coordinates (pixels)
+                'x': image_x,  # Image coordinates (pixels)
+                'y': image_y   # Image coordinates (pixels)
             }
 
             self.marker_distance_calibrations[marker_id].append(calibration_point)
@@ -3631,6 +3703,51 @@ class TelemetryApp(QMainWindow):
                         # ミッションモードを元に戻す
                         self.active_mission_mode = original_mission_mode
 
+                        # Update current propeller values and display during replay
+                        self.current_ail = ail_pwm
+                        self.current_elev = elev_pwm
+                        self.current_rudd = rudd_pwm
+                        self.current_thro = thro_pwm
+                        self.current_aux1 = int(target_aux1)
+
+                        # Update stick displays immediately with replay commands
+                        if hasattr(self, 'left_stick') and hasattr(self, 'right_stick'):
+                            # Normalize replay command values for stick display
+                            rud_norm = self.normalize_symmetrical(rudd_pwm, **self.RC_RANGES['rudd'])
+                            ele_norm = self.normalize_symmetrical(elev_pwm, **self.RC_RANGES['elev'])
+                            ail_norm = self.normalize_symmetrical(ail_pwm, **self.RC_RANGES['ail'])
+                            thr_norm = self.normalize_value(thro_pwm, **self.RC_RANGES['thro'])
+
+                            # Apply inversions for proper display
+                            self.left_stick.set_position(-rud_norm, -ele_norm)
+                            self.right_stick.set_position(ail_norm, thr_norm)
+
+                            # Update labels
+                            if hasattr(self, 'left_stick_label'):
+                                self.left_stick_label.setText(f"R: {rudd_pwm}, E: {elev_pwm}")
+                            if hasattr(self, 'right_stick_label'):
+                                self.right_stick_label.setText(f"A: {ail_pwm}, T: {thro_pwm}")
+
+                        # Update manual piloting tab stick displays during replay
+                        if hasattr(self, 'manual_left_stick') and hasattr(self, 'manual_right_stick'):
+                            # Normalize replay command values for manual tab stick display
+                            rud_norm = self.normalize_symmetrical(rudd_pwm, **self.RC_RANGES['rudd'])
+                            ele_norm = self.normalize_symmetrical(elev_pwm, **self.RC_RANGES['elev'])
+                            ail_norm = self.normalize_symmetrical(ail_pwm, **self.RC_RANGES['ail'])
+                            thr_norm = self.normalize_value(thro_pwm, **self.RC_RANGES['thro'])
+
+                            # Set autopilot position for manual tab sticks
+                            self.manual_left_stick.set_autopilot_position(rud_norm, -ele_norm)
+                            self.manual_left_stick.set_autopilot_active(True)
+                            self.manual_right_stick.set_autopilot_position(ail_norm, thr_norm)
+                            self.manual_right_stick.set_autopilot_active(True)
+
+                            # Update manual tab labels
+                            if hasattr(self, 'manual_left_stick_label'):
+                                self.manual_left_stick_label.setText(f"R: {rudd_pwm}, E: {elev_pwm}")
+                            if hasattr(self, 'manual_right_stick_label'):
+                                self.manual_right_stick_label.setText(f"A: {ail_pwm}, T: {thro_pwm}")
+
                         # デバッグ出力は設定間隔ごと（データが更新された時のみ）
                         if not hasattr(self, '_last_replay_data') or self._last_replay_data != current_data:
                             print(f"Manual Piloting Replay: Alt:{target_altitude:.1f}mm, Yaw:{target_yaw_absolute:.1f}°(Δ{target_yaw_displacement:.1f}°), Roll:0.0°, Controls: A{ail_pwm} E{elev_pwm} T{thro_pwm} R{rudd_pwm} AUX1:{int(target_aux1)}, Time:{current_time:.1f}s")
@@ -3638,6 +3755,10 @@ class TelemetryApp(QMainWindow):
 
                         # ログ再現飛行中は制御コマンドを生成したので、後続の処理は継続
                         # return を削除して通常の処理を継続
+
+                    # Always update flight state graph with current replay time indicator during replay
+                    if hasattr(self, 'flight_state_graph') and self.loaded_input_log:
+                        self.flight_state_graph.update_plots(self.loaded_input_log, replay_time=current_time)
 
                     # Check if replay is complete (time-based)
                     if (self.loaded_input_log and
@@ -3703,10 +3824,23 @@ class TelemetryApp(QMainWindow):
                 aruco2_size, aruco2_id, aruco2_x, aruco2_y = parts[17:21]
                 aruco3_size, aruco3_id, aruco3_x, aruco3_y = parts[21:25]
 
-                # ArUcoマーカー情報を保存
-                self.aruco_markers[1] = {'size': aruco1_size, 'id': int(aruco1_id), 'x': aruco1_x, 'y': aruco1_y}
-                self.aruco_markers[2] = {'size': aruco2_size, 'id': int(aruco2_id), 'x': aruco2_x, 'y': aruco2_y}
-                self.aruco_markers[3] = {'size': aruco3_size, 'id': int(aruco3_id), 'x': aruco3_x, 'y': aruco3_y}
+                # ArUcoマーカー情報を保存（既存のimage_x, image_yを保持）
+                for marker_id, size, id_val, x, y in [(1, aruco1_size, aruco1_id, aruco1_x, aruco1_y),
+                                                       (2, aruco2_size, aruco2_id, aruco2_x, aruco2_y),
+                                                       (3, aruco3_size, aruco3_id, aruco3_x, aruco3_y)]:
+                    if marker_id not in self.aruco_markers:
+                        self.aruco_markers[marker_id] = {}
+
+                    # Update with new data while preserving image coordinates
+                    self.aruco_markers[marker_id].update({
+                        'size': float(size),
+                        'id': int(id_val),
+                        'x': float(x),
+                        'y': float(y),
+                        'image_x': self.aruco_markers[marker_id].get('image_x', 0),
+                        'image_y': self.aruco_markers[marker_id].get('image_y', 0),
+                        'detected': float(size) > 0
+                    })
 
                 # リアルタイムマーカーデータ更新
                 self.update_marker_realtime_display()
@@ -4308,6 +4442,18 @@ class TelemetryApp(QMainWindow):
         # 右スティック（エルロン、スロットル）
         self.right_stick.set_autopilot_position(ail_out, thro_norm)
 
+        # Update manual piloting tab stick displays too
+        if hasattr(self, 'manual_left_stick'):
+            self.manual_left_stick.set_autopilot_position(rudd_out, -elev_out)
+        if hasattr(self, 'manual_right_stick'):
+            self.manual_right_stick.set_autopilot_position(ail_out, thro_norm)
+
+        # Update auto landing tab stick displays too
+        if hasattr(self, 'auto_left_stick'):
+            self.auto_left_stick.set_autopilot_position(rudd_out, -elev_out)
+        if hasattr(self, 'auto_right_stick'):
+            self.auto_right_stick.set_autopilot_position(ail_out, thro_norm)
+
         commands = {
             'ail': self.denormalize_symmetrical(ail_out, 'ail'),
             'elev': self.denormalize_symmetrical(elev_out, 'elev'),
@@ -4316,6 +4462,30 @@ class TelemetryApp(QMainWindow):
         }
         self.send_serial_command(commands)
         self.last_autopilot_commands = commands
+
+        # Update current propeller input values with autopilot commands
+        self.current_ail = commands['ail']
+        self.current_elev = commands['elev']
+        self.current_rudd = commands['rudd']
+        self.current_thro = commands['thro']
+
+        # Update propeller display with autopilot commands
+        if hasattr(self, 'left_stick') and hasattr(self, 'right_stick'):
+            # Normalize values for stick display
+            rud_norm = self.normalize_symmetrical(commands['rudd'], **self.RC_RANGES['rudd'])
+            ele_norm = self.normalize_symmetrical(commands['elev'], **self.RC_RANGES['elev'])
+            ail_norm = self.normalize_symmetrical(commands['ail'], **self.RC_RANGES['ail'])
+            thr_norm = self.normalize_value(commands['thro'], **self.RC_RANGES['thro'])
+
+            # Set stick positions (with proper inversions)
+            self.left_stick.set_position(-rud_norm, -ele_norm)
+            self.right_stick.set_position(ail_norm, thr_norm)
+
+            # Update stick labels
+            if hasattr(self, 'left_stick_label'):
+                self.left_stick_label.setText(f"R: {int(commands['rudd'])}, E: {int(commands['elev'])}")
+            if hasattr(self, 'right_stick_label'):
+                self.right_stick_label.setText(f"A: {int(commands['ail'])}, T: {int(commands['thro'])}")
 
     def send_serial_command(self, commands):
         try:
@@ -4678,7 +4848,57 @@ class TelemetryApp(QMainWindow):
             # ミッションモードを元に戻す
             self.active_mission_mode = original_mission_mode
 
+            # Update current propeller values and display during auto landing replay
+            self.current_ail = commands['ail']
+            self.current_elev = commands['elev']
+            self.current_rudd = commands['rudd']
+            self.current_thro = commands['thro']
+            self.current_aux1 = commands['aux1']
+
+            # Update stick displays immediately with auto landing replay commands
+            if hasattr(self, 'left_stick') and hasattr(self, 'right_stick'):
+                # Normalize auto landing replay command values for stick display
+                rud_norm = self.normalize_symmetrical(commands['rudd'], **self.RC_RANGES['rudd'])
+                ele_norm = self.normalize_symmetrical(commands['elev'], **self.RC_RANGES['elev'])
+                ail_norm = self.normalize_symmetrical(commands['ail'], **self.RC_RANGES['ail'])
+                thr_norm = self.normalize_value(commands['thro'], **self.RC_RANGES['thro'])
+
+                # Apply inversions for proper display
+                self.left_stick.set_position(-rud_norm, -ele_norm)
+                self.right_stick.set_position(ail_norm, thr_norm)
+
+                # Update labels
+                if hasattr(self, 'left_stick_label'):
+                    self.left_stick_label.setText(f"R: {int(commands['rudd'])}, E: {int(commands['elev'])}")
+                if hasattr(self, 'right_stick_label'):
+                    self.right_stick_label.setText(f"A: {int(commands['ail'])}, T: {int(commands['thro'])}")
+
+            # Update manual piloting tab stick displays during auto landing replay
+            if hasattr(self, 'manual_left_stick') and hasattr(self, 'manual_right_stick'):
+                # Normalize auto landing replay command values for manual tab stick display
+                rud_norm = self.normalize_symmetrical(commands['rudd'], **self.RC_RANGES['rudd'])
+                ele_norm = self.normalize_symmetrical(commands['elev'], **self.RC_RANGES['elev'])
+                ail_norm = self.normalize_symmetrical(commands['ail'], **self.RC_RANGES['ail'])
+                thr_norm = self.normalize_value(commands['thro'], **self.RC_RANGES['thro'])
+
+                # Set autopilot position for manual tab sticks
+                self.manual_left_stick.set_autopilot_position(rud_norm, -ele_norm)
+                self.manual_left_stick.set_autopilot_active(True)
+                self.manual_right_stick.set_autopilot_position(ail_norm, thr_norm)
+                self.manual_right_stick.set_autopilot_active(True)
+
+                # Update manual tab labels
+                if hasattr(self, 'manual_left_stick_label'):
+                    self.manual_left_stick_label.setText(f"R: {int(commands['rudd'])}, E: {int(commands['elev'])}")
+                if hasattr(self, 'manual_right_stick_label'):
+                    self.manual_right_stick_label.setText(f"A: {int(commands['ail'])}, T: {int(commands['thro'])}")
+
             print(f"Auto landing replay: Alt={altitude_target}, Yaw={yaw_target:.1f}°, Thro={throttle_target}, AUX1={aux1_target}")
+
+        # Always update flight state graph with current replay time indicator during replay
+        if hasattr(self, 'flight_state_graph') and self.loaded_auto_landing_log:
+            elapsed_time = time.time() - self.auto_landing_log_replay_start_time
+            self.flight_state_graph.update_plots(self.loaded_auto_landing_log, replay_time=elapsed_time)
 
     def update_auto_landing_log_interval(self, value):
         """Update auto landing log recording interval"""

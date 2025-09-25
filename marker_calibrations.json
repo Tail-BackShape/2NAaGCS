@@ -1,5 +1,5 @@
 {
-  "last_updated": "2025-09-24T00:00:00.000000",
+  "last_updated": "2025-09-25T20:49:11.312900",
   "version": "2.0",
   "angle_calibrations": {
     "1": {
@@ -13,8 +13,25 @@
     }
   },
   "distance_calibrations": {
-    "1": [],
-    "2": [],
-    "3": []
+    "3": [
+      {
+        "distance": 20.0,
+        "size": 32.0,
+        "x": 0,
+        "y": 0
+      },
+      {
+        "distance": 25.0,
+        "size": 25.0,
+        "x": 0,
+        "y": 0
+      },
+      {
+        "distance": 30.0,
+        "size": 21.0,
+        "x": 0,
+        "y": 0
+      }
+    ]
   }
 }
