@@ -3557,7 +3557,14 @@ class TelemetryApp(QMainWindow):
 
     @Slot(str)
     def update_video_status(self, status_text):
-        self.video_status_label.setText(f"ステータス: {status_text}")
+        # 長いエラーメッセージは短縮表示＋ツールチップ
+        max_len = 50
+        if len(status_text) > max_len:
+            short_text = status_text[:max_len] + "...（省略）"
+        else:
+            short_text = status_text
+        self.video_status_label.setText(f"ステータス: {short_text}")
+        self.video_status_label.setToolTip(status_text)
 
     def convert_cv_qt(self, cv_img):
         rgb_image = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
@@ -3974,6 +3981,36 @@ class TelemetryApp(QMainWindow):
                 self.update_auto_landing_phase()
 
                 self.check_mission_triggers([aux1, aux2, aux3, aux4, aux5])
+                # --- 自動離着陸タブの表示を常時更新（AUX5 OFF/手動時も） ---
+                # 手動状態の自動操縦量・2D姿勢角度表示
+                if hasattr(self, 'auto_left_stick') and hasattr(self, 'auto_right_stick'):
+                    # プロポ入力値を正規化して表示
+                    rud_norm = self.normalize_symmetrical(float(rudd), **self.RC_RANGES['rudd'])
+                    ele_norm = self.normalize_symmetrical(float(elev), **self.RC_RANGES['elev'])
+                    rud_norm = -rud_norm
+                    ele_norm = -ele_norm
+                    ail_norm = self.normalize_symmetrical(float(ail), **self.RC_RANGES['ail'])
+                    thr_norm = self.normalize_value(float(thro), **self.RC_RANGES['thro'])
+                    self.auto_left_stick.set_position(rud_norm, ele_norm)
+                    self.auto_left_stick.set_autopilot_position(None, None)
+                    self.auto_left_stick.set_autopilot_active(False)
+                    self.auto_right_stick.set_position(ail_norm, thr_norm)
+                    self.auto_right_stick.set_autopilot_position(None, None)
+                    self.auto_right_stick.set_autopilot_active(False)
+                    if hasattr(self, 'auto_left_stick_label'):
+                        self.auto_left_stick_label.setText(f"R: {int(float(rudd))}, E: {int(float(elev))}")
+                    if hasattr(self, 'auto_right_stick_label'):
+                        self.auto_right_stick_label.setText(f"A: {int(float(ail))}, T: {int(float(thro))}")
+
+                # 2D姿勢角度パネルも常時更新
+                if hasattr(self, 'auto_pitch_widget') and hasattr(self, 'auto_yaw_widget'):
+                    roll = self.latest_attitude.get('roll', 0)
+                    pitch = self.latest_attitude.get('pitch', 0)
+                    yaw = self.latest_attitude.get('yaw', 0)
+                    self.auto_pitch_widget.set_angle(pitch)
+                    self.auto_yaw_widget.set_angle(yaw)
+                    self.auto_pitch_widget.set_autopilot_active(False)
+                    self.auto_yaw_widget.set_autopilot_active(False)
             else:
                 print(f"データ形式エラー: 25パラメータが必要ですが、{len(parts)}パラメータを受信しました - {line}")
         except (ValueError, IndexError) as e:
