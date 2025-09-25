@@ -1867,6 +1867,10 @@ class TelemetryApp(QMainWindow):
             # Reset phase
             self.auto_landing_phase = 0
 
+            # Start auto landing mission (ミッションモード4)
+            self.start_mission(4)
+            print("自動離着陸ミッション（ミッションモード4）を開始しました")
+
             # Update button text
             self.auto_landing_enable_button.setText("自動離着陸無効化")
         elif button_pressed and not self.aux5_enabled:
@@ -1875,8 +1879,14 @@ class TelemetryApp(QMainWindow):
             self.auto_landing_enabled = False
             print("自動離着陸を有効化できません: AUX5がOFFです")
         else:
-            print("Auto landing disabled")
+            self.auto_landing_enabled = False
+            print("自動離着陸が無効化されました")
             self.auto_landing_phase = 0
+
+            # Stop auto landing mission
+            if self.autopilot_active and self.active_mission_mode == 4:
+                self.stop_mission()
+                print("自動離着陸ミッション（ミッションモード4）を停止しました")
 
             # Clear autopilot displays
             if hasattr(self, 'auto_left_stick') and hasattr(self, 'auto_right_stick'):
@@ -3340,20 +3350,36 @@ class TelemetryApp(QMainWindow):
         }
         self.send_serial_command(commands)
 
-        # Update auto landing stick displays
+        # Update auto landing stick displays with actual sent RC values
         if hasattr(self, 'auto_left_stick') and hasattr(self, 'auto_right_stick'):
+            # Normalize actual RC values for display
+            rud_norm = self.normalize_symmetrical(rudder_rc, **self.RC_RANGES['rudd'])
+            ele_norm = self.normalize_symmetrical(elevator_rc, **self.RC_RANGES['elev'])
+            ail_norm = self.normalize_symmetrical(aileron_rc, **self.RC_RANGES['ail'])
+            thr_norm = self.normalize_value(throttle_rc, **self.RC_RANGES['thro'])
+
+            # Set both position (actual values) and autopilot position (for yellow marker)
+            self.auto_left_stick.set_position(-rud_norm, -ele_norm)  # Inverted for proper display
             self.auto_left_stick.set_autopilot_position(target_rudder, elevator_cmd)
             self.auto_left_stick.set_autopilot_active(True)
 
-            throttle_norm = (target_throttle - 400) / 600.0 - 1.0  # Normalize throttle
+            self.auto_right_stick.set_position(ail_norm, thr_norm)
             self.auto_right_stick.set_autopilot_position(aileron_cmd, throttle_norm)
             self.auto_right_stick.set_autopilot_active(True)
 
         # Update manual piloting tab stick displays (same values as auto landing)
         if hasattr(self, 'manual_left_stick') and hasattr(self, 'manual_right_stick'):
+            # Normalize actual RC values for manual tab display
+            rud_norm = self.normalize_symmetrical(rudder_rc, **self.RC_RANGES['rudd'])
+            ele_norm = self.normalize_symmetrical(elevator_rc, **self.RC_RANGES['elev'])
+            ail_norm = self.normalize_symmetrical(aileron_rc, **self.RC_RANGES['ail'])
+            thr_norm = self.normalize_value(throttle_rc, **self.RC_RANGES['thro'])
+
+            self.manual_left_stick.set_position(-rud_norm, -ele_norm)
             self.manual_left_stick.set_autopilot_position(target_rudder, elevator_cmd)
             self.manual_left_stick.set_autopilot_active(True)
 
+            self.manual_right_stick.set_position(ail_norm, thr_norm)
             throttle_norm = (target_throttle - 400) / 600.0 - 1.0  # Normalize throttle
             self.manual_right_stick.set_autopilot_position(aileron_cmd, throttle_norm)
             self.manual_right_stick.set_autopilot_active(True)
@@ -4089,21 +4115,13 @@ class TelemetryApp(QMainWindow):
 
         # AUX5がONで自動離着陸が有効な場合のミッション制御
         if self.aux5_enabled and self.auto_landing_enabled:
+            # 自動離着陸が有効な場合は常にミッションモード4で動作
+            if not self.autopilot_active or self.active_mission_mode != 4:
+                self.start_mission(4)  # 自動離着陸用ミッションモード4を開始
 
-            # ミッションモード制御
-            # 操縦量記録中は手動（ミッションモード0）、再現飛行中のみミッションモード4
-            if self.input_log_replaying or self.auto_landing_log_replaying:
-                # 再現飛行中はミッションモード4
-                if not self.autopilot_active or self.active_mission_mode != 4:
-                    self.start_mission(4)  # 再現飛行用ミッションモード4を開始
-            else:
-                # 操縦量記録中または通常の自動離着陸時は手動（ミッションモード0）
-                if self.autopilot_active and self.active_mission_mode != 0:
-                    self.stop_mission()  # 他のミッションを停止して手動に戻す
-
-                # 飛行状態記録処理
-                if self.auto_landing_log_recording:
-                    self.record_auto_landing_log_data()
+            # 飛行状態記録処理
+            if self.auto_landing_log_recording:
+                self.record_auto_landing_log_data()
 
         # 既存のミッション処理（AUX2-4）
         # 再現飛行中のみ他のミッションを無視、記録中や通常時は他のミッションも有効
@@ -4433,14 +4451,19 @@ class TelemetryApp(QMainWindow):
             else:
                 # ミッション完了後は水平飛行
                 target_roll = 0
-        elif self.active_mission_mode == 4:  # 再現飛行ミッション
+        elif self.active_mission_mode == 4:  # 自動離着陸/再現飛行ミッション
             # 再現飛行中は入力再生処理で直接シリアル送信済みなので、ここでは何もしない
             if self.input_log_replaying:
                 # 入力再生処理で既にシリアル送信済み、追加の制御は行わない
                 return
             else:
-                # 再現飛行でない場合は手動操縦として処理
-                target_altitude = self.mission_start_altitude
+                # 自動離着陸制御を実行
+                if self.auto_landing_enabled:
+                    self.run_auto_landing_control()
+                    return  # run_auto_landing_control()で制御済みなので早期リターン
+                else:
+                    # 自動離着陸が無効な場合は手動操縦として処理
+                    target_altitude = self.mission_start_altitude
         else:
             # 手動操縦時：ミッション開始時の高度を基準とする
             target_altitude = self.mission_start_altitude
