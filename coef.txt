@@ -5,7 +5,7 @@
     "pitch_p": "0.025",
     "pitch_i": "0.0",
     "pitch_d": "0.05",
-    "yaw_p": "0.2",
+    "yaw_p": "0.02",
     "yaw_i": "0.0",
     "yaw_d": "0.0",
     "bank_angle": "25",

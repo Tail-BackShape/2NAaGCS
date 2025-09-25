@@ -473,9 +473,9 @@ class FlightStateGraphWidget(QWidget):
         self.ax3.set_ylabel('Throttle')
         self.ax3.grid(True, alpha=0.3)
         self.ax3.tick_params(labelbottom=False)  # Hide x-axis labels for middle plots
-        # Set throttle axis with typical RC range
-        self.ax3.set_ylim(1000, 2000)  # Typical RC servo range
-        self.ax3.set_yticks([1000, 1200, 1400, 1600, 1800, 2000])
+        # Set throttle axis with custom range
+        self.ax3.set_ylim(0, 1700)  # Custom throttle range
+        self.ax3.set_yticks([0, 200, 400, 600, 800, 1000, 1200, 1400, 1600])
 
         # Plot 4: AUX1
         self.ax4.plot(times, aux1_values, 'm-', linewidth=2, label='AUX1')
@@ -1382,6 +1382,22 @@ class TelemetryApp(QMainWindow):
 
         layout.addWidget(input_group)
 
+        # Manual piloting stick displays (autopilot servo control visualization)
+        manual_control_group = QGroupBox("自動操縦時操縦量")
+        manual_control_layout = QGridLayout(manual_control_group)
+
+        self.manual_left_stick = StickWidget("ラダー", "エレベーター")
+        self.manual_right_stick = StickWidget("エルロン", "スロットル")
+        self.manual_left_stick_label = QLabel("R: 0, E: 0")
+        self.manual_right_stick_label = QLabel("A: 0, T: 0")
+
+        manual_control_layout.addWidget(self.manual_left_stick, 0, 0)
+        manual_control_layout.addWidget(self.manual_right_stick, 0, 1)
+        manual_control_layout.addWidget(self.manual_left_stick_label, 1, 0, Qt.AlignCenter)
+        manual_control_layout.addWidget(self.manual_right_stick_label, 1, 1, Qt.AlignCenter)
+
+        layout.addWidget(manual_control_group)
+
         # Recording Progress group
         progress_group = QGroupBox("記録進行状況")
         progress_layout = QVBoxLayout(progress_group)
@@ -1512,63 +1528,6 @@ class TelemetryApp(QMainWindow):
         params_layout.addRow(update_params_button)
 
         layout.addWidget(params_group)
-
-        # Auto Landing Log System Control
-        log_group = QGroupBox("飛行状態ログシステム")
-        log_layout = QVBoxLayout(log_group)
-
-        # Recording controls
-        record_layout = QHBoxLayout()
-        self.auto_landing_log_record_button = QPushButton("飛行状態記録開始")
-        self.auto_landing_log_record_button.setStyleSheet("background-color: #28a745; color: white;")
-        self.auto_landing_log_record_button.clicked.connect(self.toggle_auto_landing_log_recording)
-        self.auto_landing_log_stop_record_button = QPushButton("記録停止")
-        self.auto_landing_log_stop_record_button.setStyleSheet("background-color: #dc3545; color: white;")
-        self.auto_landing_log_stop_record_button.clicked.connect(self.stop_auto_landing_log_recording)
-        self.auto_landing_log_stop_record_button.setEnabled(False)
-
-        record_layout.addWidget(self.auto_landing_log_record_button)
-        record_layout.addWidget(self.auto_landing_log_stop_record_button)
-
-        # Replay controls
-        replay_layout = QHBoxLayout()
-        self.auto_landing_log_load_button = QPushButton("ログファイル読み込み")
-        self.auto_landing_log_load_button.clicked.connect(self.load_auto_landing_log)
-        self.auto_landing_log_replay_button = QPushButton("ログ再現飛行開始")
-        self.auto_landing_log_replay_button.setStyleSheet("background-color: #007bff; color: white;")
-        self.auto_landing_log_replay_button.clicked.connect(self.start_auto_landing_log_replay)
-        self.auto_landing_log_replay_button.setEnabled(False)
-        self.auto_landing_log_stop_replay_button = QPushButton("再現停止")
-        self.auto_landing_log_stop_replay_button.setStyleSheet("background-color: #dc3545; color: white;")
-        self.auto_landing_log_stop_replay_button.clicked.connect(self.stop_auto_landing_log_replay)
-        self.auto_landing_log_stop_replay_button.setEnabled(False)
-
-        replay_layout.addWidget(self.auto_landing_log_load_button)
-        replay_layout.addWidget(self.auto_landing_log_replay_button)
-        replay_layout.addWidget(self.auto_landing_log_stop_replay_button)
-
-        # Status display
-        self.auto_landing_log_status_label = QLabel("状態: 待機中")
-        self.auto_landing_log_status_label.setStyleSheet("font-weight: bold; color: #666;")
-
-        # Interval setting
-        interval_layout = QHBoxLayout()
-        interval_label = QLabel("記録間隔:")
-        self.auto_landing_log_interval_input = QDoubleSpinBox()
-        self.auto_landing_log_interval_input.setRange(0.05, 1.0)
-        self.auto_landing_log_interval_input.setSingleStep(0.01)
-        self.auto_landing_log_interval_input.setValue(0.1)
-        self.auto_landing_log_interval_input.setSuffix(" 秒")
-        self.auto_landing_log_interval_input.valueChanged.connect(self.update_auto_landing_log_interval)
-        interval_layout.addWidget(interval_label)
-        interval_layout.addWidget(self.auto_landing_log_interval_input)
-
-        log_layout.addLayout(record_layout)
-        log_layout.addLayout(replay_layout)
-        log_layout.addWidget(self.auto_landing_log_status_label)
-        log_layout.addLayout(interval_layout)
-
-        layout.addWidget(log_group)
 
         layout.addStretch()
 
@@ -1853,6 +1812,23 @@ class TelemetryApp(QMainWindow):
                 self.auto_right_stick.set_autopilot_position(None, None)
                 self.auto_right_stick.set_autopilot_active(False)
 
+            # Reset manual piloting tab stick displays as well
+            if hasattr(self, 'manual_left_stick') and hasattr(self, 'manual_right_stick'):
+                self.manual_left_stick.set_autopilot_position(None, None)
+                self.manual_left_stick.set_autopilot_active(False)
+                self.manual_right_stick.set_autopilot_position(None, None)
+                self.manual_right_stick.set_autopilot_active(False)
+
+            # Reset stick labels for both auto landing and manual piloting tabs
+            if hasattr(self, 'auto_left_stick_label'):
+                self.auto_left_stick_label.setText("R: 0, E: 0")
+            if hasattr(self, 'auto_right_stick_label'):
+                self.auto_right_stick_label.setText("A: 0, T: 0")
+            if hasattr(self, 'manual_left_stick_label'):
+                self.manual_left_stick_label.setText("R: 0, E: 0")
+            if hasattr(self, 'manual_right_stick_label'):
+                self.manual_right_stick_label.setText("A: 0, T: 0")
+
             # Update button text
             self.auto_landing_enable_button.setText("自動離着陸有効化")
 
@@ -1954,7 +1930,7 @@ class TelemetryApp(QMainWindow):
             self.input_log_last_record_time = 0
 
             # 手動操縦記録開始時の基準ヨー角を設定
-            self.mission_start_yaw = getattr(self, 'yaw_angle', 0.0)
+            self.mission_start_yaw = self.latest_attitude.get('yaw', 0.0)
             print(f"手動操縦記録開始: 基準ヨー角={self.mission_start_yaw:.1f}°")
 
             self.record_button.setText("操縦記録停止")
@@ -2095,7 +2071,7 @@ class TelemetryApp(QMainWindow):
             self.input_log_replay_index = 0
 
             # 再現開始時の基準ヨー角を設定（記録されたデータは変位角のため）
-            self.replay_start_yaw = getattr(self, 'yaw_angle', 0.0)
+            self.replay_start_yaw = self.latest_attitude.get('yaw', 0.0)
             print(f"ログ再現開始: 基準ヨー角={self.replay_start_yaw:.1f}°")
 
             # ログ再現飛行用のPIDコントローラーをリセット
@@ -2132,7 +2108,8 @@ class TelemetryApp(QMainWindow):
                     'ail': getattr(self, 'current_ail', 1500),
                     'elev': getattr(self, 'current_elev', 1500),
                     'thro': getattr(self, 'current_thro', 1000),
-                    'rudd': getattr(self, 'current_rudd', 1500)
+                    'rudd': getattr(self, 'current_rudd', 1500),
+                    'aux1': getattr(self, 'current_aux1', 1500)  # AUX1も含める
                 }
                 self.send_serial_command(current_commands)
                 print("ミッションモード0（手動）に即座に切り替えました")
@@ -3248,11 +3225,26 @@ class TelemetryApp(QMainWindow):
             self.auto_right_stick.set_autopilot_position(aileron_cmd, throttle_norm)
             self.auto_right_stick.set_autopilot_active(True)
 
+        # Update manual piloting tab stick displays (same values as auto landing)
+        if hasattr(self, 'manual_left_stick') and hasattr(self, 'manual_right_stick'):
+            self.manual_left_stick.set_autopilot_position(target_rudder, elevator_cmd)
+            self.manual_left_stick.set_autopilot_active(True)
+
+            throttle_norm = (target_throttle - 400) / 600.0 - 1.0  # Normalize throttle
+            self.manual_right_stick.set_autopilot_position(aileron_cmd, throttle_norm)
+            self.manual_right_stick.set_autopilot_active(True)
+
         # Update stick labels
         if hasattr(self, 'auto_left_stick_label'):
             self.auto_left_stick_label.setText(f"R: {rudder_rc}, E: {elevator_rc}")
         if hasattr(self, 'auto_right_stick_label'):
             self.auto_right_stick_label.setText(f"A: {aileron_rc}, T: {throttle_rc}")
+
+        # Update manual piloting tab stick labels
+        if hasattr(self, 'manual_left_stick_label'):
+            self.manual_left_stick_label.setText(f"R: {rudder_rc}, E: {elevator_rc}")
+        if hasattr(self, 'manual_right_stick_label'):
+            self.manual_right_stick_label.setText(f"A: {aileron_rc}, T: {throttle_rc}")
 
         # Update auto landing attitude displays
         if hasattr(self, 'auto_pitch_widget') and hasattr(self, 'auto_yaw_widget'):
@@ -3609,19 +3601,39 @@ class TelemetryApp(QMainWindow):
                         ail_pwm = max(self.RC_RANGES['ail']['min_in'], min(self.RC_RANGES['ail']['max_in'], ail_pwm))
                         elev_pwm = max(self.RC_RANGES['elev']['min_in'], min(self.RC_RANGES['elev']['max_in'], elev_pwm))
                         rudd_pwm = max(self.RC_RANGES['rudd']['min_in'], min(self.RC_RANGES['rudd']['max_in'], rudd_pwm))
-                        # スロットルは範囲制限なし（ログデータをそのまま使用）                        # partsを更新
-                        parts[4] = str(ail_pwm)   # AIL
-                        parts[5] = str(elev_pwm)  # ELEV
-                        parts[6] = str(thro_pwm)  # THRO
-                        parts[7] = str(rudd_pwm)  # RUDD
+                        # スロットルは範囲制限なし（ログデータをそのまま使用）
+
+                        # partsを数値として更新（文字列変換は行わない）
+                        parts[4] = float(ail_pwm)   # AIL
+                        parts[5] = float(elev_pwm)  # ELEV
+                        parts[6] = float(thro_pwm)  # THRO
+                        parts[7] = float(rudd_pwm)  # RUDD
 
                         # Override AUX1 directly
                         if len(parts) > 8:
-                            parts[8] = str(int(target_aux1))  # AUX1
+                            parts[8] = float(int(target_aux1))  # AUX1
+
+                        # 制御コマンドを即座に送信（ミッションモード4で送信）
+                        replay_commands = {
+                            'ail': ail_pwm,
+                            'elev': elev_pwm,
+                            'rudd': rudd_pwm,
+                            'thro': thro_pwm,
+                            'aux1': int(target_aux1)  # AUX1（物資投下）も再現
+                        }
+
+                        # ミッションモードを一時的に4に設定して送信
+                        original_mission_mode = self.active_mission_mode
+                        self.active_mission_mode = 4
+
+                        self.send_serial_command(replay_commands)
+
+                        # ミッションモードを元に戻す
+                        self.active_mission_mode = original_mission_mode
 
                         # デバッグ出力は設定間隔ごと（データが更新された時のみ）
                         if not hasattr(self, '_last_replay_data') or self._last_replay_data != current_data:
-                            print(f"Manual Piloting Replay: Alt:{target_altitude:.1f}mm, Yaw:{target_yaw_absolute:.1f}°(Δ{target_yaw_displacement:.1f}°), Roll:0.0°, Controls: A{ail_pwm} E{elev_pwm} T{thro_pwm} R{rudd_pwm}, Time:{current_time:.1f}s")
+                            print(f"Manual Piloting Replay: Alt:{target_altitude:.1f}mm, Yaw:{target_yaw_absolute:.1f}°(Δ{target_yaw_displacement:.1f}°), Roll:0.0°, Controls: A{ail_pwm} E{elev_pwm} T{thro_pwm} R{rudd_pwm} AUX1:{int(target_aux1)}, Time:{current_time:.1f}s")
                             self._last_replay_data = current_data
 
                         # ログ再現飛行中は制御コマンドを生成したので、後続の処理は継続
@@ -3641,7 +3653,8 @@ class TelemetryApp(QMainWindow):
                                 'ail': self.current_ail,
                                 'elev': self.current_elev,
                                 'thro': self.current_thro,
-                                'rudd': self.current_rudd
+                                'rudd': self.current_rudd,
+                                'aux1': getattr(self, 'current_aux1', 1500)  # AUX1も含める
                             }
                             self.send_serial_command(current_commands)
                             print("ミッションモード0（手動）に即座に切り替えました")
@@ -3663,7 +3676,8 @@ class TelemetryApp(QMainWindow):
                     if current_time - self.input_log_last_record_time >= self.input_log_interval:
                         elapsed_time = current_time - self.input_log_start_time
                         # ヨー角の変位（ミッション開始時からの相対角度）を計算
-                        yaw_displacement = self.yaw_angle - self.mission_start_yaw
+                        current_yaw = self.latest_attitude.get('yaw', 0.0)
+                        yaw_displacement = current_yaw - self.mission_start_yaw
                         # 角度を-180~+180度の範囲に正規化
                         while yaw_displacement > 180:
                             yaw_displacement -= 360
@@ -3673,10 +3687,10 @@ class TelemetryApp(QMainWindow):
                         log_entry = {
                             'timestamp': current_time,
                             'elapsed_time': elapsed_time,
-                            'altitude': self.altitude,
+                            'altitude': self.latest_attitude.get('alt', 0),
                             'yaw': yaw_displacement,  # 変位角を記録
-                            'throttle': int(thro),
-                            'aux1': int(parts[8]) if len(parts) > 8 else 1000
+                            'throttle': int(float(thro)),
+                            'aux1': int(float(parts[8])) if len(parts) > 8 else 1000
                         }
                         self.input_log_data.append(log_entry)
                         self.input_log_last_record_time = current_time
@@ -3747,23 +3761,23 @@ class TelemetryApp(QMainWindow):
                 # Store current flight state data for auto landing log
                 self.current_altitude = filtered_alt
                 self.current_yaw = yaw
-                self.current_throttle = thro
-                self.current_aux1 = aux1
+                self.current_throttle = float(thro)
+                self.current_aux1 = float(aux1)
 
                 # Update input replay tab displays
-                self.update_input_replay_displays(ail, elev, thro, rudd, aux1)
+                self.update_input_replay_displays(float(ail), float(elev), float(thro), float(rudd), float(aux1))
 
-                rud_norm = self.normalize_symmetrical(rudd, **self.RC_RANGES['rudd'])
-                ele_norm = self.normalize_symmetrical(elev, **self.RC_RANGES['elev'])
+                rud_norm = self.normalize_symmetrical(float(rudd), **self.RC_RANGES['rudd'])
+                ele_norm = self.normalize_symmetrical(float(elev), **self.RC_RANGES['elev'])
                 rud_norm = -rud_norm
                 ele_norm = -ele_norm
                 self.left_stick.set_position(rud_norm, ele_norm)
-                self.left_stick_label.setText(f"R: {int(rudd)}, E: {int(elev)}")
+                self.left_stick_label.setText(f"R: {int(float(rudd))}, E: {int(float(elev))}")
 
-                ail_norm = self.normalize_symmetrical(ail, **self.RC_RANGES['ail'])
-                thr_norm = self.normalize_value(thro, **self.RC_RANGES['thro'])
+                ail_norm = self.normalize_symmetrical(float(ail), **self.RC_RANGES['ail'])
+                thr_norm = self.normalize_value(float(thro), **self.RC_RANGES['thro'])
                 self.right_stick.set_position(ail_norm, thr_norm)
-                self.right_stick_label.setText(f"A: {int(ail)}, T: {int(thro)}")
+                self.right_stick_label.setText(f"A: {int(float(ail))}, T: {int(float(thro))}")
 
                 # スティックウィジェットに自動操縦状態を設定
                 self.left_stick.set_autopilot_active(self.autopilot_active)
@@ -3849,6 +3863,9 @@ class TelemetryApp(QMainWindow):
                 # Update replay button state when AUX5 is disabled
                 self.update_replay_button_state()
 
+                # AUX5無効時に即座に手動操縦に戻る処理
+                self.emergency_return_to_manual()
+
                 # 自動離着陸が無効になった場合、アクティブなミッションを停止する
                 if self.autopilot_active:
                     self.stop_mission()
@@ -3921,6 +3938,80 @@ class TelemetryApp(QMainWindow):
         # スティックウィジェットの自動操縦表示をクリア
         self.left_stick.set_autopilot_position(None, None)
         self.right_stick.set_autopilot_position(None, None)
+
+    def emergency_return_to_manual(self):
+        """AUX5無効時に即座に手動操縦に戻る緊急処理"""
+        print("緊急手動復帰: AUX5が無効になりました")
+
+        # 進行中の全ての自動操作を停止
+
+        # 1. ログ再現飛行を停止
+        if self.input_log_replaying:
+            self.input_log_replaying = False
+            self.replay_button.setText("ログ再現飛行開始")
+            self.replay_button.setStyleSheet("")
+            self.replay_status_label.setText("緊急停止: AUX5無効")
+            self.replay_status_label.setStyleSheet("color: #dc3545; font-weight: bold;")
+            print("手動操縦ログ再現を緊急停止しました")
+
+        # 2. 自動離着陸ログ再現を停止
+        if hasattr(self, 'auto_landing_log_replaying') and self.auto_landing_log_replaying:
+            self.auto_landing_log_replaying = False
+            print("自動離着陸ログ再現を緊急停止しました")
+
+        # 3. 操縦記録を停止
+        if self.input_log_recording:
+            self.input_log_recording = False
+            self.record_button.setChecked(False)
+            self.record_button.setText("操縦記録開始")
+            self.record_status_label.setText("緊急停止: AUX5無効")
+            self.record_status_label.setStyleSheet("color: #dc3545; font-weight: bold;")
+            print("手動操縦記録を緊急停止しました")
+
+        # 4. 自動離着陸ログ記録を停止
+        if hasattr(self, 'auto_landing_log_recording') and self.auto_landing_log_recording:
+            self.auto_landing_log_recording = False
+            print("自動離着陸ログ記録を緊急停止しました")
+
+        # 5. 即座に現在のプロポ入力値で手動操縦コマンドを送信
+        if self.is_connected:
+            manual_commands = {
+                'ail': int(self.current_ail),
+                'elev': int(self.current_elev),
+                'thro': int(self.current_thro),
+                'rudd': int(self.current_rudd),
+                'aux1': int(getattr(self, 'current_aux1', 1500))  # AUX1も含める
+            }
+
+            # ミッションモードを0（手動）に設定して送信
+            original_mission_mode = self.active_mission_mode
+            self.active_mission_mode = 0
+
+            self.send_serial_command(manual_commands)
+            print(f"緊急手動復帰コマンド送信: A{manual_commands['ail']} E{manual_commands['elev']} T{manual_commands['thro']} R{manual_commands['rudd']} AUX1{manual_commands['aux1']}")
+
+        # 6. UI状態をリセット
+        if hasattr(self, 'auto_left_stick') and hasattr(self, 'auto_right_stick'):
+            self.auto_left_stick.set_autopilot_position(None, None)
+            self.auto_left_stick.set_autopilot_active(False)
+            self.auto_right_stick.set_autopilot_position(None, None)
+            self.auto_right_stick.set_autopilot_active(False)
+
+        if hasattr(self, 'manual_left_stick') and hasattr(self, 'manual_right_stick'):
+            self.manual_left_stick.set_autopilot_position(None, None)
+            self.manual_left_stick.set_autopilot_active(False)
+            self.manual_right_stick.set_autopilot_position(None, None)
+            self.manual_right_stick.set_autopilot_active(False)
+
+        # 7. ラベル表示をリセット
+        if hasattr(self, 'auto_left_stick_label'):
+            self.auto_left_stick_label.setText("R: 0, E: 0")
+        if hasattr(self, 'auto_right_stick_label'):
+            self.auto_right_stick_label.setText("A: 0, T: 0")
+        if hasattr(self, 'manual_left_stick_label'):
+            self.manual_left_stick_label.setText("R: 0, E: 0")
+        if hasattr(self, 'manual_right_stick_label'):
+            self.manual_right_stick_label.setText("A: 0, T: 0")
 
     def run_autopilot_cycle(self):
         if not self.is_connected:
@@ -4229,7 +4320,9 @@ class TelemetryApp(QMainWindow):
     def send_serial_command(self, commands):
         try:
             # データ送信フォーマット: エルロン,エレベータ,ラダー,スロットル,ミッションモード,AUXチャンネル
-            command_str = f"{int(commands['ail'])},{int(commands['elev'])},{int(commands['rudd'])},{int(commands['thro'])},{self.active_mission_mode},1500\n"
+            # AUX1チャンネルも含める（物資投下用）
+            aux1_value = commands.get('aux1', 1500)  # デフォルトは1500（中立）
+            command_str = f"{int(commands['ail'])},{int(commands['elev'])},{int(commands['rudd'])},{int(commands['thro'])},{self.active_mission_mode},{int(aux1_value)}\n"
             if self.serial_connection and self.serial_connection.is_open:
                 self.serial_connection.write(command_str.encode('utf-8'))
         except Exception as e:
@@ -4504,7 +4597,7 @@ class TelemetryApp(QMainWindow):
         self.auto_landing_log_replay_index = 0
 
         # 自動着陸ログ再現開始時の基準ヨー角を設定（記録されたデータは変位角のため）
-        self.auto_landing_replay_start_yaw = getattr(self, 'yaw_angle', 0.0)
+        self.auto_landing_replay_start_yaw = self.latest_attitude.get('yaw', 0.0)
         print(f"自動着陸ログ再現開始: 基準ヨー角={self.auto_landing_replay_start_yaw:.1f}°")
 
         # Update UI
@@ -4563,23 +4656,29 @@ class TelemetryApp(QMainWindow):
             # 変位角を再現開始時の基準角度に対する絶対角度に変換
             yaw_target = getattr(self, 'auto_landing_replay_start_yaw', 0.0) + yaw_displacement
 
-            # For now, send throttle and aux1 directly, use flight state for guidance
-            # In a real implementation, you would convert flight state to control surfaces
-            ail = 0  # Would be calculated from yaw target
-            elev = 0  # Would be calculated from altitude target
-            thro = int(throttle_target)
-            rudd = 0  # Would be calculated from yaw target
-            aux1 = int(aux1_target)
+            # 飛行状態から制御コマンドを生成（簡易版）
+            # 実際の実装では、目標値に対してPID制御等を適用する必要があります
 
-            # Always use mission mode 4 during replay
-            command = f"${ail},{elev},{thro},{rudd},{aux1},0,0,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*"
+            # 基本的な制御コマンド（とりあえずの実装）
+            commands = {
+                'ail': 1500,  # 中立値（後でPID制御で計算）
+                'elev': 1500, # 中立値（後で高度制御で計算）
+                'rudd': 1500, # 中立値（後でヨー制御で計算）
+                'thro': int(throttle_target),  # 記録されたスロットル値をそのまま使用
+                'aux1': int(aux1_target)  # AUX1（物資投下）も再現
+            }
 
-            if self.autopilot_serial and self.autopilot_serial.is_open:
-                try:
-                    self.autopilot_serial.write(command.encode() + b'\n')
-                    print(f"Auto landing replay data sent: Alt={altitude_target}, Yaw={yaw_target}, Thro={throttle_target}, AUX1={aux1_target}")
-                except Exception as e:
-                    print(f"Serial write error during auto landing replay: {e}")
+            # 正しいシリアル送信関数を使用（ミッションモード4で送信）
+            # ミッションモードを一時的に4に設定
+            original_mission_mode = self.active_mission_mode
+            self.active_mission_mode = 4
+
+            self.send_serial_command(commands)
+
+            # ミッションモードを元に戻す
+            self.active_mission_mode = original_mission_mode
+
+            print(f"Auto landing replay: Alt={altitude_target}, Yaw={yaw_target:.1f}°, Thro={throttle_target}, AUX1={aux1_target}")
 
     def update_auto_landing_log_interval(self, value):
         """Update auto landing log recording interval"""
