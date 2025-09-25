@@ -1,18 +1,7 @@
 {
-  "last_updated": "2025-09-25T21:03:20.732894",
-  "version": "2.0",
-  "angle_calibrations": {
-    "1": {
-      "offset_angle": 0.0
-    },
-    "2": {
-      "offset_angle": 0.0
-    },
-    "3": {
-      "offset_angle": 0.0
-    }
-  },
-  "distance_calibrations": {
+  "backup_time": "2025-09-25T21:03:22.926577",
+  "version": "1.0",
+  "markers": {
     "3": [
       {
         "distance": 5.0,

@@ -1,18 +1,7 @@
 {
-  "last_updated": "2025-09-25T21:03:20.732894",
-  "version": "2.0",
-  "angle_calibrations": {
-    "1": {
-      "offset_angle": 0.0
-    },
-    "2": {
-      "offset_angle": 0.0
-    },
-    "3": {
-      "offset_angle": 0.0
-    }
-  },
-  "distance_calibrations": {
+  "backup_time": "2025-09-25T21:00:52.453194",
+  "version": "1.0",
+  "markers": {
     "3": [
       {
         "distance": 5.0,
@@ -73,44 +62,6 @@
       {
         "distance": 20.0,
         "size": 32.0,
-        "x": 0,
-        "y": 0
-      },
-      {
-        "distance": 25.0,
-        "size": 26.0,
-        "x": 0,
-        "y": 0
-      },
-      {
-        "distance": 30.0,
-        "size": 21.0,
-        "x": 0,
-        "y": 0
-      }
-    ],
-    "2": [
-      {
-        "distance": 5.0,
-        "size": 126.0,
-        "x": 0,
-        "y": 0
-      },
-      {
-        "distance": 10.0,
-        "size": 67.0,
-        "x": 0,
-        "y": 0
-      },
-      {
-        "distance": 15.0,
-        "size": 43.0,
-        "x": 0,
-        "y": 0
-      },
-      {
-        "distance": 20.0,
-        "size": 31.0,
         "x": 0,
         "y": 0
       },

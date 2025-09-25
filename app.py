@@ -20,7 +20,7 @@ from matplotlib.figure import Figure
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGroupBox, QFormLayout, QComboBox, QPushButton, QLabel, QGridLayout, QLineEdit, QCheckBox,
-    QTabWidget, QDoubleSpinBox, QFileDialog
+    QTabWidget, QDoubleSpinBox, QFileDialog, QMessageBox
 )
 from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QPolygonF, QImage, QPixmap, QTransform, QLinearGradient
@@ -1797,11 +1797,17 @@ class TelemetryApp(QMainWindow):
         restore_calib_button = QPushButton("キャリブレーションデータ復元")
         restore_calib_button.clicked.connect(self.restore_calibration_data)
 
+        # Clear calibration data button
+        clear_calib_button = QPushButton("キャリブレーションデータクリア")
+        clear_calib_button.setStyleSheet("background-color: #8B0000; color: white;")
+        clear_calib_button.clicked.connect(self.clear_calibration_data)
+
         control_layout.addWidget(marker_select_label)
         control_layout.addWidget(self.graph_marker_combo)
         control_layout.addWidget(refresh_button)
         control_layout.addWidget(backup_calib_button)
         control_layout.addWidget(restore_calib_button)
+        control_layout.addWidget(clear_calib_button)
         control_layout.addStretch()
 
         main_layout.addWidget(control_panel)
@@ -2483,10 +2489,6 @@ class TelemetryApp(QMainWindow):
 
             self.marker_distance_calibrations[marker_id].append(calibration_point)
 
-            # Keep only the last 3 calibration points per marker
-            if len(self.marker_distance_calibrations[marker_id]) > 3:
-                self.marker_distance_calibrations[marker_id] = self.marker_distance_calibrations[marker_id][-3:]
-
             # Save to file
             self.save_marker_distance_calibrations()
 
@@ -2801,6 +2803,35 @@ class TelemetryApp(QMainWindow):
 
         except Exception as e:
             print(f"Failed to restore calibration data: {e}")
+
+    def clear_calibration_data(self):
+        """Clear all calibration data with confirmation"""
+        try:
+            # Confirmation dialog
+            reply = QMessageBox.question(self, 'キャリブレーションデータクリア',
+                                       'すべてのキャリブレーションデータを削除しますか？\n'
+                                       'この操作は元に戻せません。',
+                                       QMessageBox.Yes | QMessageBox.No,
+                                       QMessageBox.No)
+
+            if reply == QMessageBox.Yes:
+                # Create backup before clearing
+                self.backup_calibration_data()
+
+                # Clear all calibration data
+                self.marker_distance_calibrations = {}
+
+                # Save empty calibration file
+                self.save_marker_distance_calibrations()
+
+                # Update UI
+                self.update_calibration_graph()
+                self.update_calibration_data_display()
+
+                print("All calibration data cleared. Backup created before clearing.")
+
+        except Exception as e:
+            print(f"Failed to clear calibration data: {e}")
 
     def update_and_save_auto_landing_params(self):
         """Update and save auto landing parameters"""
