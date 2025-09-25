@@ -1127,6 +1127,9 @@ class TelemetryApp(QMainWindow):
         self.current_thro = 1000
         self.current_rudd = 1500
 
+        # --- AUX5 State ---
+        self.aux5_enabled = False  # AUX5スイッチの状態（テレメトリから受信）
+
         # --- Auto Landing State ---
         self.auto_landing_enabled = False
         self.auto_landing_phase = 0  # 0: Manual, 1: Takeoff, 2: Drop, 3: Steady, 4: Landing
@@ -1404,7 +1407,7 @@ class TelemetryApp(QMainWindow):
         self.aux5_status_label.setStyleSheet("color: #dc3545; font-weight: bold; font-size: 14px;")
         aux5_layout.addWidget(self.aux5_status_label)
 
-        aux5_note = QLabel("※ ログ再現にはAUX5が有効である必要があります")
+        aux5_note = QLabel("※ 自動離着陸とログ再現にはAUX5がONである必要があります\n※ AUX5がOFFの時は手動操縦コマンドを送信します")
         aux5_note.setStyleSheet("color: #666; font-size: 10px;")
         aux5_layout.addWidget(aux5_note)
 
@@ -1848,11 +1851,13 @@ class TelemetryApp(QMainWindow):
 
 
     def toggle_auto_landing(self):
-        """Toggle auto landing enable/disable"""
-        self.auto_landing_enabled = self.auto_landing_enable_button.isChecked()
+        """Toggle auto landing enable/disable - requires both GUI button and AUX5 to be ON"""
+        button_pressed = self.auto_landing_enable_button.isChecked()
 
-        if self.auto_landing_enabled:
-            print("Auto landing enabled")
+        # AUX5がONかつGUIボタンが押された場合のみ自動離着陸を有効化
+        if button_pressed and self.aux5_enabled:
+            self.auto_landing_enabled = True
+            print("自動離着陸が有効化されました (AUX5: ON, GUIボタン: ON)")
             # Reset PID controllers
             self.roll_pid.reset()
             self.pitch_pid.reset()
@@ -1864,6 +1869,11 @@ class TelemetryApp(QMainWindow):
 
             # Update button text
             self.auto_landing_enable_button.setText("自動離着陸無効化")
+        elif button_pressed and not self.aux5_enabled:
+            # AUX5がOFFの場合、ボタンを無効状態に戻す
+            self.auto_landing_enable_button.setChecked(False)
+            self.auto_landing_enabled = False
+            print("自動離着陸を有効化できません: AUX5がOFFです")
         else:
             print("Auto landing disabled")
             self.auto_landing_phase = 0
@@ -2125,7 +2135,7 @@ class TelemetryApp(QMainWindow):
                 print("再現するログがありません")
                 return
 
-            if not self.auto_landing_enabled:
+            if not self.aux5_enabled:
                 print("AUX5が無効のため、ログ再現を開始できません")
                 return
 
@@ -2186,7 +2196,7 @@ class TelemetryApp(QMainWindow):
 
     def update_replay_button_state(self):
         """Update replay button enabled state based on AUX5 and loaded log"""
-        can_replay = self.auto_landing_enabled and len(self.loaded_input_log) > 0
+        can_replay = self.aux5_enabled and len(self.loaded_input_log) > 0
         self.replay_button.setEnabled(can_replay)
 
         if can_replay:
@@ -2195,12 +2205,23 @@ class TelemetryApp(QMainWindow):
 
         # Update AUX5 status in input replay tab
         if hasattr(self, 'aux5_status_label'):
-            if self.auto_landing_enabled:
+            if self.aux5_enabled:
                 self.aux5_status_label.setText("AUX5: 有効")
                 self.aux5_status_label.setStyleSheet("color: #28a745; font-weight: bold; font-size: 14px;")
             else:
                 self.aux5_status_label.setText("AUX5: 無効")
                 self.aux5_status_label.setStyleSheet("color: #dc3545; font-weight: bold; font-size: 14px;")
+
+        # Update auto landing button state based on AUX5 availability
+        if hasattr(self, 'auto_landing_enable_button'):
+            if not self.aux5_enabled and self.auto_landing_enable_button.isChecked():
+                # AUX5がOFFでボタンがONの場合、ボタンを無効状態にする
+                self.auto_landing_enable_button.setChecked(False)
+
+        # Update auto landing log replay button state based on AUX5 availability
+        if hasattr(self, 'auto_landing_log_replay_button') and hasattr(self, 'loaded_auto_landing_log'):
+            can_replay_auto_landing = self.aux5_enabled and len(self.loaded_auto_landing_log) > 0
+            self.auto_landing_log_replay_button.setEnabled(can_replay_auto_landing)
 
     def update_input_replay_displays(self, ail, elev, thro, rudd, aux1):
         """Update real-time displays in input replay tab"""
@@ -3947,6 +3968,11 @@ class TelemetryApp(QMainWindow):
                 # スティックウィジェットに自動操縦状態を設定
                 self.left_stick.set_autopilot_active(self.autopilot_active)
                 self.right_stick.set_autopilot_active(self.autopilot_active)
+
+                # 推定距離を常時更新（自動離着陸制御パネルでの表示のため）
+                self.calculate_aircraft_position()
+                self.update_auto_landing_phase()
+
                 self.check_mission_triggers([aux1, aux2, aux3, aux4, aux5])
             else:
                 print(f"データ形式エラー: 25パラメータが必要ですが、{len(parts)}パラメータを受信しました - {line}")
@@ -3991,19 +4017,43 @@ class TelemetryApp(QMainWindow):
             4: 3  # AUX4 -> Mission 3 (八の字旋回)
         }
 
-        # AUX5の自動離着陸チェック（最優先）
-        if len(aux_values) >= 5 and float(aux_values[4]) > 1100:  # AUX5がON
-            if not self.auto_landing_enabled:
-                # 自動離着陸を有効化
-                self.auto_landing_enabled = True
-                if hasattr(self, 'auto_landing_enable_button'):
-                    self.auto_landing_enable_button.setChecked(True)
-                    self.auto_landing_enable_button.setText("自動離着陸無効化")
-                print("AUX5により自動離着陸が有効化されました")
-                # Update replay button state when AUX5 is enabled
-                self.update_replay_button_state()
+        # AUX5状態の更新（自動離着陸の有効化はしない）
+        aux5_is_on = len(aux_values) >= 5 and float(aux_values[4]) > 1100
 
-            # 自動離着陸が有効な場合のミッションモード制御
+        # AUX5状態が変化した場合の処理
+        if aux5_is_on != self.aux5_enabled:
+            self.aux5_enabled = aux5_is_on
+            if self.aux5_enabled:
+                print("AUX5スイッチがONになりました")
+            else:
+                print("AUX5スイッチがOFFになりました")
+                # AUX5がOFFになった場合、即座に全ての自動機能を停止
+
+                # 1. 自動離着陸を無効化
+                if self.auto_landing_enabled:
+                    self.auto_landing_enabled = False
+                    if hasattr(self, 'auto_landing_enable_button'):
+                        self.auto_landing_enable_button.setChecked(False)
+                        self.auto_landing_enable_button.setText("自動離着陸有効化")
+                    print("AUX5がOFFのため自動離着陸が無効化されました")
+
+                # 2. アクティブなミッションを停止
+                if self.autopilot_active:
+                    self.stop_mission()
+
+                # 3. 確実に手動状態に設定
+                self.autopilot_active = False
+                self.active_mission_mode = 0
+
+                # 4. 緊急手動復帰処理を実行
+                self.emergency_return_to_manual()
+            # Update replay button state when AUX5 state changes
+            self.update_replay_button_state()
+
+        # AUX5がONで自動離着陸が有効な場合のミッション制御
+        if self.aux5_enabled and self.auto_landing_enabled:
+
+            # ミッションモード制御
             # 操縦量記録中は手動（ミッションモード0）、再現飛行中のみミッションモード4
             if self.input_log_replaying or self.auto_landing_log_replaying:
                 # 再現飛行中はミッションモード4
@@ -4017,23 +4067,6 @@ class TelemetryApp(QMainWindow):
                 # 飛行状態記録処理
                 if self.auto_landing_log_recording:
                     self.record_auto_landing_log_data()
-        else:
-            if self.auto_landing_enabled:
-                # 自動離着陸を無効化
-                self.auto_landing_enabled = False
-                if hasattr(self, 'auto_landing_enable_button'):
-                    self.auto_landing_enable_button.setChecked(False)
-                    self.auto_landing_enable_button.setText("自動離着陸有効化")
-                print("AUX5により自動離着陸が無効化されました")
-                # Update replay button state when AUX5 is disabled
-                self.update_replay_button_state()
-
-                # AUX5無効時に即座に手動操縦に戻る処理
-                self.emergency_return_to_manual()
-
-                # 自動離着陸が無効になった場合、アクティブなミッションを停止する
-                if self.autopilot_active:
-                    self.stop_mission()
 
         # 既存のミッション処理（AUX2-4）
         # 再現飛行中のみ他のミッションを無視、記録中や通常時は他のミッションも有効
@@ -4149,11 +4182,13 @@ class TelemetryApp(QMainWindow):
             }
 
             # ミッションモードを0（手動）に設定して送信
-            original_mission_mode = self.active_mission_mode
             self.active_mission_mode = 0
 
             self.send_serial_command(manual_commands)
             print(f"緊急手動復帰コマンド送信: A{manual_commands['ail']} E{manual_commands['elev']} T{manual_commands['thro']} R{manual_commands['rudd']} AUX1{manual_commands['aux1']}")
+
+            # 緊急停止のため、autopilotもfalseに設定
+            self.autopilot_active = False
 
         # 6. UI状態をリセット
         if hasattr(self, 'auto_left_stick') and hasattr(self, 'auto_right_stick'):
@@ -4180,6 +4215,26 @@ class TelemetryApp(QMainWindow):
 
     def run_autopilot_cycle(self):
         if not self.is_connected:
+            return
+
+        # AUX5がオフの場合、手動操縦コマンドを送信（ログ再現と同様の処理）
+        if not self.aux5_enabled:
+            # 現在のプロポ入力値で手動操縦コマンドを送信
+            manual_commands = {
+                'ail': int(self.current_ail),
+                'elev': int(self.current_elev),
+                'thro': int(self.current_thro),
+                'rudd': int(self.current_rudd),
+                'aux1': int(getattr(self, 'current_aux1', 1500))
+            }
+
+            # 確実に手動状態を維持
+            self.active_mission_mode = 0  # 手動モード
+            self.autopilot_active = False  # オートパイロット無効
+            self.send_serial_command(manual_commands)
+
+            # 手動フェーズでも推定距離と高度の表示を更新
+            self.update_auto_landing_phase()
             return
 
         # Process auto landing log replay
@@ -4771,8 +4826,8 @@ class TelemetryApp(QMainWindow):
             print(f"自動離着陸ログ読み込み完了: {file_path}")
             print(f"データ点数: {len(self.loaded_auto_landing_log)}")
 
-            # Enable replay button
-            self.auto_landing_log_replay_button.setEnabled(True)
+            # Enable replay button only if AUX5 is enabled
+            self.auto_landing_log_replay_button.setEnabled(self.aux5_enabled)
             self.auto_landing_log_status_label.setText(f"状態: ログ読み込み完了 ({len(self.loaded_auto_landing_log)} データ点)")
 
             # Update flight state graph with loaded data
@@ -4789,8 +4844,8 @@ class TelemetryApp(QMainWindow):
             print("自動離着陸ログが読み込まれていません")
             return
 
-        if not self.auto_landing_enabled:
-            print("自動離着陸が有効化されていません")
+        if not self.aux5_enabled:
+            print("AUX5が無効のため、自動離着陸ログ再現を開始できません")
             return
 
         self.auto_landing_log_replaying = True
