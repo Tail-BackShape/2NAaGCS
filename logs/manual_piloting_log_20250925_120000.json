@@ -11,7 +11,7 @@
     "timestamp": 1727248200.1,
     "elapsed_time": 0.1,
     "altitude": 1005.2,
-    "yaw": 2.1,
+    "yaw": 4.2,
     "throttle": 1250,
     "aux1": 1000
   },
@@ -19,7 +19,7 @@
     "timestamp": 1727248200.2,
     "elapsed_time": 0.2,
     "altitude": 1012.1,
-    "yaw": 4.5,
+    "yaw": 8.4,
     "throttle": 1300,
     "aux1": 1000
   },
@@ -27,7 +27,7 @@
     "timestamp": 1727248200.3,
     "elapsed_time": 0.3,
     "altitude": 1020.3,
-    "yaw": 7.2,
+    "yaw": 12.5,
     "throttle": 1350,
     "aux1": 1000
   },
@@ -35,7 +35,7 @@
     "timestamp": 1727248200.4,
     "elapsed_time": 0.4,
     "altitude": 1029.8,
-    "yaw": 10.1,
+    "yaw": 16.5,
     "throttle": 1400,
     "aux1": 1000
   },
@@ -43,7 +43,7 @@
     "timestamp": 1727248200.5,
     "elapsed_time": 0.5,
     "altitude": 1040.5,
-    "yaw": 13.3,
+    "yaw": 20.5,
     "throttle": 1450,
     "aux1": 1000
   },
@@ -51,7 +51,7 @@
     "timestamp": 1727248200.6,
     "elapsed_time": 0.6,
     "altitude": 1052.4,
-    "yaw": 16.8,
+    "yaw": 24.4,
     "throttle": 1500,
     "aux1": 1000
   },
@@ -59,7 +59,7 @@
     "timestamp": 1727248200.7,
     "elapsed_time": 0.7,
     "altitude": 1065.5,
-    "yaw": 20.5,
+    "yaw": 28.1,
     "throttle": 1550,
     "aux1": 1000
   },
@@ -67,7 +67,7 @@
     "timestamp": 1727248200.8,
     "elapsed_time": 0.8,
     "altitude": 1079.8,
-    "yaw": 24.4,
+    "yaw": 31.6,
     "throttle": 1600,
     "aux1": 1000
   },
@@ -75,7 +75,7 @@
     "timestamp": 1727248200.9,
     "elapsed_time": 0.9,
     "altitude": 1095.3,
-    "yaw": 28.6,
+    "yaw": 35.0,
     "throttle": 1650,
     "aux1": 1000
   },
@@ -83,7 +83,7 @@
     "timestamp": 1727248201.0,
     "elapsed_time": 1.0,
     "altitude": 1112.0,
-    "yaw": 33.0,
+    "yaw": 38.2,
     "throttle": 1700,
     "aux1": 1000
   },
@@ -91,7 +91,7 @@
     "timestamp": 1727248201.1,
     "elapsed_time": 1.1,
     "altitude": 1129.9,
-    "yaw": 37.6,
+    "yaw": 41.2,
     "throttle": 1750,
     "aux1": 1000
   },
@@ -99,7 +99,7 @@
     "timestamp": 1727248201.2,
     "elapsed_time": 1.2,
     "altitude": 1149.0,
-    "yaw": 42.4,
+    "yaw": 43.9,
     "throttle": 1780,
     "aux1": 1000
   },
@@ -107,7 +107,7 @@
     "timestamp": 1727248201.3,
     "elapsed_time": 1.3,
     "altitude": 1169.3,
-    "yaw": 47.5,
+    "yaw": 46.4,
     "throttle": 1800,
     "aux1": 1000
   },
@@ -115,7 +115,7 @@
     "timestamp": 1727248201.4,
     "elapsed_time": 1.4,
     "altitude": 1190.8,
-    "yaw": 52.8,
+    "yaw": 48.7,
     "throttle": 1800,
     "aux1": 1000
   },
@@ -123,7 +123,7 @@
     "timestamp": 1727248201.5,
     "elapsed_time": 1.5,
     "altitude": 1213.5,
-    "yaw": 58.3,
+    "yaw": 50.6,
     "throttle": 1800,
     "aux1": 1000
   },
@@ -131,7 +131,7 @@
     "timestamp": 1727248201.6,
     "elapsed_time": 1.6,
     "altitude": 1237.4,
-    "yaw": 64.0,
+    "yaw": 52.3,
     "throttle": 1780,
     "aux1": 1000
   },
@@ -139,7 +139,7 @@
     "timestamp": 1727248201.7,
     "elapsed_time": 1.7,
     "altitude": 1262.5,
-    "yaw": 69.9,
+    "yaw": 53.8,
     "throttle": 1760,
     "aux1": 1000
   },
@@ -147,7 +147,7 @@
     "timestamp": 1727248201.8,
     "elapsed_time": 1.8,
     "altitude": 1288.8,
-    "yaw": 76.0,
+    "yaw": 54.9,
     "throttle": 1740,
     "aux1": 1000
   },
@@ -155,7 +155,7 @@
     "timestamp": 1727248201.9,
     "elapsed_time": 1.9,
     "altitude": 1316.3,
-    "yaw": 82.3,
+    "yaw": 55.7,
     "throttle": 1720,
     "aux1": 1000
   },
@@ -163,7 +163,7 @@
     "timestamp": 1727248202.0,
     "elapsed_time": 2.0,
     "altitude": 1345.0,
-    "yaw": 88.8,
+    "yaw": 56.3,
     "throttle": 1700,
     "aux1": 1000
   },
@@ -171,7 +171,7 @@
     "timestamp": 1727248202.1,
     "elapsed_time": 2.1,
     "altitude": 1374.9,
-    "yaw": 95.5,
+    "yaw": 56.5,
     "throttle": 1680,
     "aux1": 1000
   },
@@ -179,7 +179,7 @@
     "timestamp": 1727248202.2,
     "elapsed_time": 2.2,
     "altitude": 1406.0,
-    "yaw": 102.4,
+    "yaw": 56.5,
     "throttle": 1660,
     "aux1": 1000
   },
@@ -187,7 +187,7 @@
     "timestamp": 1727248202.3,
     "elapsed_time": 2.3,
     "altitude": 1438.3,
-    "yaw": 109.5,
+    "yaw": 56.1,
     "throttle": 1640,
     "aux1": 1000
   },
@@ -195,7 +195,7 @@
     "timestamp": 1727248202.4,
     "elapsed_time": 2.4,
     "altitude": 1471.8,
-    "yaw": 116.8,
+    "yaw": 55.5,
     "throttle": 1620,
     "aux1": 1000
   },
@@ -203,7 +203,7 @@
     "timestamp": 1727248202.5,
     "elapsed_time": 2.5,
     "altitude": 1506.5,
-    "yaw": 124.3,
+    "yaw": 54.6,
     "throttle": 1600,
     "aux1": 1000
   },
@@ -211,7 +211,7 @@
     "timestamp": 1727248202.6,
     "elapsed_time": 2.6,
     "altitude": 1542.4,
-    "yaw": 132.0,
+    "yaw": 53.4,
     "throttle": 1580,
     "aux1": 1000
   },
@@ -219,7 +219,7 @@
     "timestamp": 1727248202.7,
     "elapsed_time": 2.7,
     "altitude": 1579.5,
-    "yaw": 139.9,
+    "yaw": 51.9,
     "throttle": 1560,
     "aux1": 1000
   },
@@ -227,7 +227,7 @@
     "timestamp": 1727248202.8,
     "elapsed_time": 2.8,
     "altitude": 1617.8,
-    "yaw": 148.0,
+    "yaw": 50.2,
     "throttle": 1540,
     "aux1": 1000
   },
@@ -235,7 +235,7 @@
     "timestamp": 1727248202.9,
     "elapsed_time": 2.9,
     "altitude": 1657.3,
-    "yaw": 156.3,
+    "yaw": 48.2,
     "throttle": 1520,
     "aux1": 1000
   },
@@ -243,7 +243,7 @@
     "timestamp": 1727248203.0,
     "elapsed_time": 3.0,
     "altitude": 1698.0,
-    "yaw": 164.8,
+    "yaw": 46.1,
     "throttle": 1500,
     "aux1": 1000
   },
@@ -251,7 +251,7 @@
     "timestamp": 1727248203.1,
     "elapsed_time": 3.1,
     "altitude": 1739.9,
-    "yaw": 173.5,
+    "yaw": 43.7,
     "throttle": 1480,
     "aux1": 1000
   },
@@ -259,7 +259,7 @@
     "timestamp": 1727248203.2,
     "elapsed_time": 3.2,
     "altitude": 1783.0,
-    "yaw": 182.4,
+    "yaw": 41.1,
     "throttle": 1460,
     "aux1": 1000
   },
@@ -267,7 +267,7 @@
     "timestamp": 1727248203.3,
     "elapsed_time": 3.3,
     "altitude": 1827.3,
-    "yaw": 191.5,
+    "yaw": 38.4,
     "throttle": 1440,
     "aux1": 1000
   },
@@ -275,7 +275,7 @@
     "timestamp": 1727248203.4,
     "elapsed_time": 3.4,
     "altitude": 1872.8,
-    "yaw": 200.8,
+    "yaw": 35.5,
     "throttle": 1420,
     "aux1": 1000
   },
@@ -283,7 +283,7 @@
     "timestamp": 1727248203.5,
     "elapsed_time": 3.5,
     "altitude": 1919.5,
-    "yaw": 210.3,
+    "yaw": 32.4,
     "throttle": 1400,
     "aux1": 1000
   },
@@ -291,7 +291,7 @@
     "timestamp": 1727248203.6,
     "elapsed_time": 3.6,
     "altitude": 1967.4,
-    "yaw": 220.0,
+    "yaw": 29.3,
     "throttle": 1380,
     "aux1": 1000
   },
@@ -299,7 +299,7 @@
     "timestamp": 1727248203.7,
     "elapsed_time": 3.7,
     "altitude": 2016.5,
-    "yaw": 229.9,
+    "yaw": 26.0,
     "throttle": 1360,
     "aux1": 1000
   },
@@ -307,7 +307,7 @@
     "timestamp": 1727248203.8,
     "elapsed_time": 3.8,
     "altitude": 2066.8,
-    "yaw": 240.0,
+    "yaw": 22.7,
     "throttle": 1340,
     "aux1": 1000
   },
@@ -315,7 +315,7 @@
     "timestamp": 1727248203.9,
     "elapsed_time": 3.9,
     "altitude": 2118.3,
-    "yaw": 250.3,
+    "yaw": 19.4,
     "throttle": 1320,
     "aux1": 1000
   },
@@ -323,7 +323,7 @@
     "timestamp": 1727248204.0,
     "elapsed_time": 4.0,
     "altitude": 2171.0,
-    "yaw": 260.8,
+    "yaw": 16.0,
     "throttle": 1300,
     "aux1": 1000
   },
@@ -331,7 +331,7 @@
     "timestamp": 1727248204.1,
     "elapsed_time": 4.1,
     "altitude": 2224.9,
-    "yaw": 271.5,
+    "yaw": 12.6,
     "throttle": 1320,
     "aux1": 1000
   },
@@ -339,7 +339,7 @@
     "timestamp": 1727248204.2,
     "elapsed_time": 4.2,
     "altitude": 2280.0,
-    "yaw": 282.4,
+    "yaw": 9.3,
     "throttle": 1340,
     "aux1": 1000
   },
@@ -347,7 +347,7 @@
     "timestamp": 1727248204.3,
     "elapsed_time": 4.3,
     "altitude": 2336.3,
-    "yaw": 293.5,
+    "yaw": 6.0,
     "throttle": 1360,
     "aux1": 1000
   },
@@ -355,7 +355,7 @@
     "timestamp": 1727248204.4,
     "elapsed_time": 4.4,
     "altitude": 2393.8,
-    "yaw": 304.8,
+    "yaw": 2.7,
     "throttle": 1380,
     "aux1": 1000
   },
@@ -363,7 +363,7 @@
     "timestamp": 1727248204.5,
     "elapsed_time": 4.5,
     "altitude": 2452.5,
-    "yaw": 316.3,
+    "yaw": -0.4,
     "throttle": 1400,
     "aux1": 1000
   },
@@ -371,7 +371,7 @@
     "timestamp": 1727248204.6,
     "elapsed_time": 4.6,
     "altitude": 2512.4,
-    "yaw": 328.0,
+    "yaw": -3.4,
     "throttle": 1420,
     "aux1": 1000
   },
@@ -379,7 +379,7 @@
     "timestamp": 1727248204.7,
     "elapsed_time": 4.7,
     "altitude": 2573.5,
-    "yaw": 339.9,
+    "yaw": -6.3,
     "throttle": 1440,
     "aux1": 1000
   },
@@ -387,7 +387,7 @@
     "timestamp": 1727248204.8,
     "elapsed_time": 4.8,
     "altitude": 2635.8,
-    "yaw": 352.0,
+    "yaw": -9.1,
     "throttle": 1460,
     "aux1": 1000
   },
@@ -395,7 +395,7 @@
     "timestamp": 1727248204.9,
     "elapsed_time": 4.9,
     "altitude": 2699.3,
-    "yaw": 4.3,
+    "yaw": -11.7,
     "throttle": 1480,
     "aux1": 1000
   },
@@ -403,7 +403,7 @@
     "timestamp": 1727248205.0,
     "elapsed_time": 5.0,
     "altitude": 2764.0,
-    "yaw": 16.8,
+    "yaw": -14.1,
     "throttle": 1500,
     "aux1": 1000
   },
@@ -411,7 +411,7 @@
     "timestamp": 1727248205.1,
     "elapsed_time": 5.1,
     "altitude": 2829.9,
-    "yaw": 29.5,
+    "yaw": -16.3,
     "throttle": 1600,
     "aux1": 1000
   },
@@ -419,7 +419,7 @@
     "timestamp": 1727248205.2,
     "elapsed_time": 5.2,
     "altitude": 2897.0,
-    "yaw": 42.4,
+    "yaw": -18.3,
     "throttle": 1700,
     "aux1": 1000
   },
@@ -427,7 +427,7 @@
     "timestamp": 1727248205.3,
     "elapsed_time": 5.3,
     "altitude": 2965.3,
-    "yaw": 55.5,
+    "yaw": -20.1,
     "throttle": 1750,
     "aux1": 1000
   },
@@ -435,7 +435,7 @@
     "timestamp": 1727248205.4,
     "elapsed_time": 5.4,
     "altitude": 3034.8,
-    "yaw": 68.8,
+    "yaw": -21.6,
     "throttle": 1800,
     "aux1": 1000
   },
@@ -443,7 +443,7 @@
     "timestamp": 1727248205.5,
     "elapsed_time": 5.5,
     "altitude": 3105.5,
-    "yaw": 82.3,
+    "yaw": -22.9,
     "throttle": 1800,
     "aux1": 1000
   },
@@ -451,7 +451,7 @@
     "timestamp": 1727248205.6,
     "elapsed_time": 5.6,
     "altitude": 3177.4,
-    "yaw": 96.0,
+    "yaw": -23.9,
     "throttle": 1750,
     "aux1": 1000
   },
@@ -459,7 +459,7 @@
     "timestamp": 1727248205.7,
     "elapsed_time": 5.7,
     "altitude": 3250.5,
-    "yaw": 109.9,
+    "yaw": -24.7,
     "throttle": 1700,
     "aux1": 1000
   },
@@ -467,7 +467,7 @@
     "timestamp": 1727248205.8,
     "elapsed_time": 5.8,
     "altitude": 3324.8,
-    "yaw": 124.0,
+    "yaw": -25.2,
     "throttle": 1650,
     "aux1": 1000
   },
@@ -475,7 +475,7 @@
     "timestamp": 1727248205.9,
     "elapsed_time": 5.9,
     "altitude": 3400.3,
-    "yaw": 138.3,
+    "yaw": -25.4,
     "throttle": 1600,
     "aux1": 1000
   },
@@ -483,7 +483,7 @@
     "timestamp": 1727248206.0,
     "elapsed_time": 6.0,
     "altitude": 3477.0,
-    "yaw": 152.8,
+    "yaw": -25.4,
     "throttle": 1550,
     "aux1": 1000
   },
@@ -491,7 +491,7 @@
     "timestamp": 1727248206.1,
     "elapsed_time": 6.1,
     "altitude": 3554.9,
-    "yaw": 167.5,
+    "yaw": -25.0,
     "throttle": 1500,
     "aux1": 1000
   },
@@ -499,7 +499,7 @@
     "timestamp": 1727248206.2,
     "elapsed_time": 6.2,
     "altitude": 3634.0,
-    "yaw": 182.4,
+    "yaw": -24.5,
     "throttle": 1450,
     "aux1": 1000
   },
@@ -507,7 +507,7 @@
     "timestamp": 1727248206.3,
     "elapsed_time": 6.3,
     "altitude": 3714.3,
-    "yaw": 197.5,
+    "yaw": -23.6,
     "throttle": 1400,
     "aux1": 1000
   },
@@ -515,7 +515,7 @@
     "timestamp": 1727248206.4,
     "elapsed_time": 6.4,
     "altitude": 3795.8,
-    "yaw": 212.8,
+    "yaw": -22.5,
     "throttle": 1350,
     "aux1": 1000
   },
@@ -523,7 +523,7 @@
     "timestamp": 1727248206.5,
     "elapsed_time": 6.5,
     "altitude": 3878.5,
-    "yaw": 228.3,
+    "yaw": -21.2,
     "throttle": 1300,
     "aux1": 1000
   },
@@ -531,7 +531,7 @@
     "timestamp": 1727248206.6,
     "elapsed_time": 6.6,
     "altitude": 3962.4,
-    "yaw": 244.0,
+    "yaw": -19.6,
     "throttle": 1300,
     "aux1": 1000
   },
@@ -539,7 +539,7 @@
     "timestamp": 1727248206.7,
     "elapsed_time": 6.7,
     "altitude": 4047.5,
-    "yaw": 259.9,
+    "yaw": -17.8,
     "throttle": 1300,
     "aux1": 1000
   },
@@ -547,7 +547,7 @@
     "timestamp": 1727248206.8,
     "elapsed_time": 6.8,
     "altitude": 4133.8,
-    "yaw": 276.0,
+    "yaw": -15.8,
     "throttle": 1300,
     "aux1": 1000
   },
@@ -555,7 +555,7 @@
     "timestamp": 1727248206.9,
     "elapsed_time": 6.9,
     "altitude": 4221.3,
-    "yaw": 292.3,
+    "yaw": -13.5,
     "throttle": 1300,
     "aux1": 1000
   },
@@ -563,7 +563,7 @@
     "timestamp": 1727248207.0,
     "elapsed_time": 7.0,
     "altitude": 4310.0,
-    "yaw": 308.8,
+    "yaw": -11.1,
     "throttle": 1300,
     "aux1": 1000
   },
@@ -571,7 +571,7 @@
     "timestamp": 1727248207.1,
     "elapsed_time": 7.1,
     "altitude": 4399.9,
-    "yaw": 325.5,
+    "yaw": -8.6,
     "throttle": 1350,
     "aux1": 1000
   },
@@ -579,7 +579,7 @@
     "timestamp": 1727248207.2,
     "elapsed_time": 7.2,
     "altitude": 4491.0,
-    "yaw": 342.4,
+    "yaw": -5.9,
     "throttle": 1400,
     "aux1": 1000
   },
@@ -587,7 +587,7 @@
     "timestamp": 1727248207.3,
     "elapsed_time": 7.3,
     "altitude": 4583.3,
-    "yaw": 359.5,
+    "yaw": -3.0,
     "throttle": 1450,
     "aux1": 1000
   },
@@ -595,7 +595,7 @@
     "timestamp": 1727248207.4,
     "elapsed_time": 7.4,
     "altitude": 4676.8,
-    "yaw": 16.8,
+    "yaw": -0.1,
     "throttle": 1500,
     "aux1": 1000
   },
@@ -603,7 +603,7 @@
     "timestamp": 1727248207.5,
     "elapsed_time": 7.5,
     "altitude": 4771.5,
-    "yaw": 34.3,
+    "yaw": 3.0,
     "throttle": 1550,
     "aux1": 1000
   },
@@ -611,7 +611,7 @@
     "timestamp": 1727248207.6,
     "elapsed_time": 7.6,
     "altitude": 4867.4,
-    "yaw": 52.0,
+    "yaw": 6.1,
     "throttle": 1600,
     "aux1": 1000
   },
@@ -619,7 +619,7 @@
     "timestamp": 1727248207.7,
     "elapsed_time": 7.7,
     "altitude": 4964.5,
-    "yaw": 69.9,
+    "yaw": 9.3,
     "throttle": 1650,
     "aux1": 1000
   },
@@ -627,7 +627,7 @@
     "timestamp": 1727248207.8,
     "elapsed_time": 7.8,
     "altitude": 5062.8,
-    "yaw": 88.0,
+    "yaw": 12.4,
     "throttle": 1700,
     "aux1": 1000
   },
@@ -635,7 +635,7 @@
     "timestamp": 1727248207.9,
     "elapsed_time": 7.9,
     "altitude": 5162.3,
-    "yaw": 106.3,
+    "yaw": 15.6,
     "throttle": 1750,
     "aux1": 1000
   },
@@ -643,7 +643,7 @@
     "timestamp": 1727248208.0,
     "elapsed_time": 8.0,
     "altitude": 5263.0,
-    "yaw": 124.8,
+    "yaw": 18.8,
     "throttle": 1800,
     "aux1": 1000
   },
@@ -651,7 +651,7 @@
     "timestamp": 1727248208.1,
     "elapsed_time": 8.1,
     "altitude": 5364.9,
-    "yaw": 143.5,
+    "yaw": 21.9,
     "throttle": 1750,
     "aux1": 1000
   },
@@ -659,7 +659,7 @@
     "timestamp": 1727248208.2,
     "elapsed_time": 8.2,
     "altitude": 5468.0,
-    "yaw": 162.4,
+    "yaw": 24.9,
     "throttle": 1700,
     "aux1": 1000
   },
@@ -667,7 +667,7 @@
     "timestamp": 1727248208.3,
     "elapsed_time": 8.3,
     "altitude": 5572.3,
-    "yaw": 181.5,
+    "yaw": 27.8,
     "throttle": 1650,
     "aux1": 1000
   },
@@ -675,7 +675,7 @@
     "timestamp": 1727248208.4,
     "elapsed_time": 8.4,
     "altitude": 5677.8,
-    "yaw": 200.8,
+    "yaw": 30.7,
     "throttle": 1600,
     "aux1": 1000
   },
@@ -683,7 +683,7 @@
     "timestamp": 1727248208.5,
     "elapsed_time": 8.5,
     "altitude": 5784.5,
-    "yaw": 220.3,
+    "yaw": 33.4,
     "throttle": 1550,
     "aux1": 1000
   },
@@ -691,7 +691,7 @@
     "timestamp": 1727248208.6,
     "elapsed_time": 8.6,
     "altitude": 5892.4,
-    "yaw": 240.0,
+    "yaw": 35.9,
     "throttle": 1500,
     "aux1": 1000
   },
@@ -699,7 +699,7 @@
     "timestamp": 1727248208.7,
     "elapsed_time": 8.7,
     "altitude": 6001.5,
-    "yaw": 259.9,
+    "yaw": 38.3,
     "throttle": 1450,
     "aux1": 1000
   },
@@ -707,7 +707,7 @@
     "timestamp": 1727248208.8,
     "elapsed_time": 8.8,
     "altitude": 6111.8,
-    "yaw": 280.0,
+    "yaw": 40.5,
     "throttle": 1400,
     "aux1": 1000
   },
@@ -715,7 +715,7 @@
     "timestamp": 1727248208.9,
     "elapsed_time": 8.9,
     "altitude": 6223.3,
-    "yaw": 300.3,
+    "yaw": 42.5,
     "throttle": 1350,
     "aux1": 1000
   },
@@ -723,7 +723,7 @@
     "timestamp": 1727248209.0,
     "elapsed_time": 9.0,
     "altitude": 6336.0,
-    "yaw": 320.8,
+    "yaw": 44.3,
     "throttle": 1300,
     "aux1": 1000
   },
@@ -731,7 +731,7 @@
     "timestamp": 1727248209.1,
     "elapsed_time": 9.1,
     "altitude": 6449.9,
-    "yaw": 341.5,
+    "yaw": 45.8,
     "throttle": 1250,
     "aux1": 1000
   },
@@ -739,7 +739,7 @@
     "timestamp": 1727248209.2,
     "elapsed_time": 9.2,
     "altitude": 6565.0,
-    "yaw": 2.4,
+    "yaw": 47.1,
     "throttle": 1200,
     "aux1": 1000
   },
@@ -747,7 +747,7 @@
     "timestamp": 1727248209.3,
     "elapsed_time": 9.3,
     "altitude": 6681.3,
-    "yaw": 23.5,
+    "yaw": 48.1,
     "throttle": 1150,
     "aux1": 1000
   },
@@ -755,7 +755,7 @@
     "timestamp": 1727248209.4,
     "elapsed_time": 9.4,
     "altitude": 6798.8,
-    "yaw": 44.8,
+    "yaw": 48.8,
     "throttle": 1100,
     "aux1": 1000
   },
@@ -763,7 +763,7 @@
     "timestamp": 1727248209.5,
     "elapsed_time": 9.5,
     "altitude": 6917.5,
-    "yaw": 66.3,
+    "yaw": 49.3,
     "throttle": 1050,
     "aux1": 1000
   },
@@ -771,7 +771,7 @@
     "timestamp": 1727248209.6,
     "elapsed_time": 9.6,
     "altitude": 7037.4,
-    "yaw": 88.0,
+    "yaw": 49.5,
     "throttle": 1000,
     "aux1": 1000
   },
@@ -779,7 +779,7 @@
     "timestamp": 1727248209.7,
     "elapsed_time": 9.7,
     "altitude": 7158.5,
-    "yaw": 109.9,
+    "yaw": 49.4,
     "throttle": 1000,
     "aux1": 1000
   },
@@ -787,7 +787,7 @@
     "timestamp": 1727248209.8,
     "elapsed_time": 9.8,
     "altitude": 7280.8,
-    "yaw": 132.0,
+    "yaw": 49.0,
     "throttle": 1000,
     "aux1": 1000
   },
@@ -795,7 +795,7 @@
     "timestamp": 1727248209.9,
     "elapsed_time": 9.9,
     "altitude": 7404.3,
-    "yaw": 154.3,
+    "yaw": 48.3,
     "throttle": 1000,
     "aux1": 1000
   },
@@ -803,7 +803,7 @@
     "timestamp": 1727248210.0,
     "elapsed_time": 10.0,
     "altitude": 7529.0,
-    "yaw": 176.8,
+    "yaw": 47.3,
     "throttle": 1000,
     "aux1": 1000
   }

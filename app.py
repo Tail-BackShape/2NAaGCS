@@ -403,8 +403,8 @@ class FlightStateGraphWidget(QWidget):
         self.ax1.grid(True, alpha=0.3)
         self.ax1.tick_params(labelbottom=False)  # Hide x-axis labels for top plots
 
-        self.ax2.set_title('Yaw Angle Change', fontsize=12, fontweight='bold')
-        self.ax2.set_ylabel('Yaw Angle (deg)')
+        self.ax2.set_title('Yaw Displacement (from start)', fontsize=12, fontweight='bold')
+        self.ax2.set_ylabel('Yaw Displacement (deg)')
         self.ax2.grid(True, alpha=0.3)
         self.ax2.tick_params(labelbottom=False)  # Hide x-axis labels for middle plots
 
@@ -459,13 +459,13 @@ class FlightStateGraphWidget(QWidget):
 
         # Plot 2: Yaw angle
         self.ax2.plot(times, yaw_angles, 'r-', linewidth=2, label='Yaw Angle')
-        self.ax2.set_title('Yaw Angle Change', fontsize=12, fontweight='bold')
-        self.ax2.set_ylabel('Yaw Angle (deg)')
-        self.ax2.set_ylim(0, 360)  # Fixed scale for yaw (0-360 degrees)
+        self.ax2.set_title('Yaw Displacement (from start)', fontsize=12, fontweight='bold')
+        self.ax2.set_ylabel('Yaw Displacement (deg)')
+        self.ax2.set_ylim(-180, 180)  # Fixed scale for yaw displacement (-180 to +180 degrees)
         self.ax2.grid(True, alpha=0.3)
         self.ax2.tick_params(labelbottom=False)  # Hide x-axis labels for middle plots
         # Add major ticks every 45 degrees
-        self.ax2.set_yticks([0, 45, 90, 135, 180, 225, 270, 315, 360])
+        self.ax2.set_yticks([-180, -135, -90, -45, 0, 45, 90, 135, 180])
 
         # Plot 3: Throttle
         self.ax3.plot(times, throttles, 'g-', linewidth=2, label='Throttle')
@@ -483,9 +483,9 @@ class FlightStateGraphWidget(QWidget):
         self.ax4.set_xlabel('Time (sec)')  # Only show x-axis label on bottom plot
         self.ax4.set_ylabel('AUX1 Value')
         self.ax4.grid(True, alpha=0.3)
-        # Set AUX1 axis with typical RC range
-        self.ax4.set_ylim(1000, 2000)  # Typical RC servo range
-        self.ax4.set_yticks([1000, 1200, 1400, 1600, 1800, 2000])
+        # Set AUX1 axis with extended range
+        self.ax4.set_ylim(0, 2000)  # Extended range from 0 to 2000
+        self.ax4.set_yticks([0, 400, 800, 1200, 1600, 2000])
 
         # Set common time axis for all plots
         if times:
@@ -1290,7 +1290,7 @@ class TelemetryApp(QMainWindow):
         # Load/Save controls
         file_layout = QHBoxLayout()
         self.save_log_button = QPushButton("操縦ログ保存")
-        self.load_log_button = QPushButton("操縦ログ読み込み")
+        self.load_log_button = QPushButton("操縦ログ選択・読み込み")
         self.save_log_button.clicked.connect(self.save_input_log)
         self.load_log_button.clicked.connect(self.load_input_log)
 
@@ -1362,7 +1362,7 @@ class TelemetryApp(QMainWindow):
         layout = QVBoxLayout(panel)
 
         # Current Input Values group
-        input_group = QGroupBox("現在のプロポ入力値")
+        input_group = QGroupBox("現在の機体状態量")
         input_layout = QGridLayout(input_group)
 
         # Create labels for current flight state values
@@ -1953,6 +1953,10 @@ class TelemetryApp(QMainWindow):
             self.input_log_start_time = 0
             self.input_log_last_record_time = 0
 
+            # 手動操縦記録開始時の基準ヨー角を設定
+            self.mission_start_yaw = getattr(self, 'yaw_angle', 0.0)
+            print(f"手動操縦記録開始: 基準ヨー角={self.mission_start_yaw:.1f}°")
+
             self.record_button.setText("操縦記録停止")
             self.record_button.setStyleSheet("background-color: #dc3545; color: white;")
             self.record_status_label.setText("記録中...")
@@ -2011,17 +2015,27 @@ class TelemetryApp(QMainWindow):
             print(f"手動操縦ログ保存エラー: {e}")
 
     def load_input_log(self):
-        """Load manual piloting flight state log from file"""
+        """Load manual piloting flight state log from file with dialog"""
         try:
-            # Find the most recent manual piloting log file
-            log_files = glob.glob('logs/manual_piloting_log_*.json')
-            if not log_files:
-                print("手動操縦ログファイルが見つかりません")
-                self.replay_status_label.setText("手動操縦ログファイルなし")
+            # Open file dialog to select manual piloting log file
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "手動操縦ログを選択",
+                "logs/",
+                "JSON Files (*.json);;All Files (*)"
+            )
+
+            if not file_path:
+                print("ファイル選択がキャンセルされました")
                 return
 
-            # Load the most recent file
-            latest_file = max(log_files, key=os.path.getctime)
+            # Verify it's a valid manual piloting log file
+            if not (file_path.endswith('.json') and ('manual_piloting_log_' in file_path or 'manual_piloting_dummy_log' in file_path)):
+                print("選択されたファイルは手動操縦ログファイルではありません")
+                self.replay_status_label.setText("無効なファイル")
+                return
+
+            latest_file = file_path
 
             with open(latest_file, 'r', encoding='utf-8') as f:
                 self.loaded_input_log = json.load(f)
@@ -2053,6 +2067,11 @@ class TelemetryApp(QMainWindow):
             # Update replay button state based on AUX5
             self.update_replay_button_state()
 
+            # Update graph with loaded log data
+            if hasattr(self, 'flight_state_graph') and self.flight_state_graph:
+                self.flight_state_graph.update_plots(self.loaded_input_log)
+                print("手動操縦ログのグラフを更新しました")
+
             print(f"ログを読み込みました: {latest_file} ({data_points}点, {duration:.1f}秒, 間隔:{loaded_interval:.3f}秒)")
 
         except Exception as e:
@@ -2074,6 +2093,21 @@ class TelemetryApp(QMainWindow):
             self.input_log_replaying = True
             self.input_log_replay_start_time = time.time()
             self.input_log_replay_index = 0
+
+            # 再現開始時の基準ヨー角を設定（記録されたデータは変位角のため）
+            self.replay_start_yaw = getattr(self, 'yaw_angle', 0.0)
+            print(f"ログ再現開始: 基準ヨー角={self.replay_start_yaw:.1f}°")
+
+            # ログ再現飛行用のPIDコントローラーをリセット
+            if hasattr(self, 'roll_pid'):
+                self.roll_pid.reset()
+            if hasattr(self, 'yaw_pid'):
+                self.yaw_pid.reset()
+            if hasattr(self, 'pitch_pid'):
+                self.pitch_pid.reset()
+            if hasattr(self, 'alt_pid'):
+                self.alt_pid.reset()
+            print("ログ再現用PIDコントローラーをリセットしました")
 
             # Start mission mode 4 for input replay
             self.start_mission(4)
@@ -3520,28 +3554,78 @@ class TelemetryApp(QMainWindow):
                     if current_data:
                         # 手動操縦ログ再現では飛行状態目標値を設定（自動制御で達成）
                         target_altitude = float(current_data['altitude'])
-                        target_yaw = float(current_data['yaw'])
+                        target_yaw_displacement = float(current_data['yaw'])  # 記録された変位角
                         target_throttle = float(current_data['throttle'])
                         target_aux1 = float(current_data['aux1'])
 
-                        # Set flight state targets for auto landing system
-                        self.target_altitude = target_altitude
-                        self.target_yaw_angle = target_yaw
+                        # 変位角を再現開始時の基準角度に対する絶対角度に変換
+                        target_yaw_absolute = getattr(self, 'replay_start_yaw', 0.0) + target_yaw_displacement
 
-                        # Override throttle and AUX1 directly
+                        # Set flight state targets for manual piloting replay system
+                        self.target_altitude = target_altitude
+                        self.target_yaw_angle = target_yaw_absolute
+
+                        # ログ再現飛行専用制御: ロール角は常に0度目標、ヨー角はラダーで制御
+                        self.replay_target_roll = 0.0  # ロール角は常に0度
+                        self.replay_target_yaw = target_yaw_absolute  # ヨー角目標
+
+                        # 制御コマンドを計算してpropsに設定
+                        dt = 0.02  # 50Hz制御ループ想定
+                        current_roll = self.latest_attitude.get('roll', 0.0)
+                        current_yaw = self.latest_attitude.get('yaw', 0.0)
+
+                        # ロール角制御（水平旋回パラメータを使用）
+                        self.roll_pid.setpoint = self.replay_target_roll
+                        ail_command = self.roll_pid.update(current_roll, dt)
+
+                        # ヨー角制御（ラダーで直接制御、水平旋回パラメータを使用）
+                        yaw_error = target_yaw_absolute - current_yaw
+                        # ヨー角誤差を-180~+180度に正規化
+                        while yaw_error > 180:
+                            yaw_error -= 360
+                        while yaw_error < -180:
+                            yaw_error += 360
+
+                        self.yaw_pid.setpoint = 0.0  # 誤差を0にするように制御
+                        rudd_command = self.yaw_pid.update(-yaw_error, dt)  # 負号で方向調整
+
+                        # 高度制御（エレベータ）
+                        current_alt = self.get_corrected_altitude(
+                            self.latest_attitude.get('alt', self.mission_start_altitude),
+                            current_roll
+                        )
+                        altitude_error = target_altitude - current_alt
+                        target_pitch_from_alt = self.alt_pid.update(current_alt, dt)
+                        self.pitch_pid.setpoint = target_pitch_from_alt
+                        elev_command = self.pitch_pid.update(self.latest_attitude.get('pitch', 0.0), dt)
+
+                        # 制御出力を他の自動ミッションと同じ方式で変換（RC_RANGES使用）
+                        ail_pwm = int(self.denormalize_symmetrical(ail_command, 'ail'))
+                        elev_pwm = int(self.denormalize_symmetrical(elev_command, 'elev'))
+                        rudd_pwm = int(self.denormalize_symmetrical(rudd_command, 'rudd'))
+                        thro_pwm = int(target_throttle)  # スロットルはログデータをそのまま使用
+
+                        # PWM値を実測範囲内に制限（他の自動ミッションと同じ制限）
+                        ail_pwm = max(self.RC_RANGES['ail']['min_in'], min(self.RC_RANGES['ail']['max_in'], ail_pwm))
+                        elev_pwm = max(self.RC_RANGES['elev']['min_in'], min(self.RC_RANGES['elev']['max_in'], elev_pwm))
+                        rudd_pwm = max(self.RC_RANGES['rudd']['min_in'], min(self.RC_RANGES['rudd']['max_in'], rudd_pwm))
+                        # スロットルは範囲制限なし（ログデータをそのまま使用）                        # partsを更新
+                        parts[4] = str(ail_pwm)   # AIL
+                        parts[5] = str(elev_pwm)  # ELEV
+                        parts[6] = str(thro_pwm)  # THRO
+                        parts[7] = str(rudd_pwm)  # RUDD
+
+                        # Override AUX1 directly
                         if len(parts) > 8:
                             parts[8] = str(int(target_aux1))  # AUX1
 
-                        # Use auto landing control system to achieve targets
-                        # The control commands will be calculated automatically
-
                         # デバッグ出力は設定間隔ごと（データが更新された時のみ）
                         if not hasattr(self, '_last_replay_data') or self._last_replay_data != current_data:
-                            print(f"Manual Piloting Replay: Target Alt:{target_altitude:.1f}mm, Yaw:{target_yaw:.1f}°, Throttle:{target_throttle}, AUX1:{target_aux1}, Time:{current_time:.1f}s")
+                            print(f"Manual Piloting Replay: Alt:{target_altitude:.1f}mm, Yaw:{target_yaw_absolute:.1f}°(Δ{target_yaw_displacement:.1f}°), Roll:0.0°, Controls: A{ail_pwm} E{elev_pwm} T{thro_pwm} R{rudd_pwm}, Time:{current_time:.1f}s")
                             self._last_replay_data = current_data
 
-                        # ログ再現飛行中は直接送信したので、後続の処理をスキップ
-                        return
+                        # ログ再現飛行中は制御コマンドを生成したので、後続の処理は継続
+                        # return を削除して通常の処理を継続
 
                     # Check if replay is complete (time-based)
                     if (self.loaded_input_log and
@@ -3578,11 +3662,19 @@ class TelemetryApp(QMainWindow):
                     # 設定した間隔経過した場合のみ記録
                     if current_time - self.input_log_last_record_time >= self.input_log_interval:
                         elapsed_time = current_time - self.input_log_start_time
+                        # ヨー角の変位（ミッション開始時からの相対角度）を計算
+                        yaw_displacement = self.yaw_angle - self.mission_start_yaw
+                        # 角度を-180~+180度の範囲に正規化
+                        while yaw_displacement > 180:
+                            yaw_displacement -= 360
+                        while yaw_displacement < -180:
+                            yaw_displacement += 360
+
                         log_entry = {
                             'timestamp': current_time,
                             'elapsed_time': elapsed_time,
                             'altitude': self.altitude,
-                            'yaw': self.yaw_angle,
+                            'yaw': yaw_displacement,  # 変位角を記録
                             'throttle': int(thro),
                             'aux1': int(parts[8]) if len(parts) > 8 else 1000
                         }
@@ -3834,8 +3926,7 @@ class TelemetryApp(QMainWindow):
         if not self.is_connected:
             return
 
-        # Process input log replay and auto landing log replay
-        self.process_input_log_replay()
+        # Process auto landing log replay
         self.process_auto_landing_log_replay()
 
         if not self.autopilot_active:
@@ -4340,12 +4431,20 @@ class TelemetryApp(QMainWindow):
         throttle = getattr(self, 'current_throttle', 0.0)  # Get current throttle from propeller inputs
         aux1 = getattr(self, 'current_aux1', 0.0)          # Get current AUX1 (material drop timing)
 
+        # ヨー角の変位（ミッション開始時からの相対角度）を計算
+        yaw_displacement = yaw_angle - getattr(self, 'mission_start_yaw', 0.0)
+        # 角度を-180~+180度の範囲に正規化
+        while yaw_displacement > 180:
+            yaw_displacement -= 360
+        while yaw_displacement < -180:
+            yaw_displacement += 360
+
         # Create log entry
         log_entry = {
             'timestamp': current_time,
             'elapsed_time': elapsed_time,
             'altitude': altitude,
-            'yaw': yaw_angle,
+            'yaw': yaw_displacement,  # 変位角を記録
             'throttle': throttle,
             'aux1': aux1
         }
@@ -4404,6 +4503,10 @@ class TelemetryApp(QMainWindow):
         self.auto_landing_log_replay_start_time = time.time()
         self.auto_landing_log_replay_index = 0
 
+        # 自動着陸ログ再現開始時の基準ヨー角を設定（記録されたデータは変位角のため）
+        self.auto_landing_replay_start_yaw = getattr(self, 'yaw_angle', 0.0)
+        print(f"自動着陸ログ再現開始: 基準ヨー角={self.auto_landing_replay_start_yaw:.1f}°")
+
         # Update UI
         self.auto_landing_log_replay_button.setEnabled(False)
         self.auto_landing_log_stop_replay_button.setEnabled(True)
@@ -4453,9 +4556,12 @@ class TelemetryApp(QMainWindow):
             # This would typically involve converting altitude, yaw, throttle, aux1
             # into appropriate control surface commands
             altitude_target = data_point['altitude']
-            yaw_target = data_point['yaw']
+            yaw_displacement = data_point['yaw']  # 記録された変位角
             throttle_target = data_point['throttle']
             aux1_target = data_point['aux1']
+
+            # 変位角を再現開始時の基準角度に対する絶対角度に変換
+            yaw_target = getattr(self, 'auto_landing_replay_start_yaw', 0.0) + yaw_displacement
 
             # For now, send throttle and aux1 directly, use flight state for guidance
             # In a real implementation, you would convert flight state to control surfaces
