@@ -1883,35 +1883,11 @@ class TelemetryApp(QMainWindow):
             print("自動離着陸が無効化されました")
             self.auto_landing_phase = 0
 
-            # Stop auto landing mission
+            # Stop auto landing mission and immediately return to manual
             if self.autopilot_active and self.active_mission_mode == 4:
                 self.stop_mission()
                 print("自動離着陸ミッション（ミッションモード4）を停止しました")
-
-            # Clear autopilot displays
-            if hasattr(self, 'auto_left_stick') and hasattr(self, 'auto_right_stick'):
-                self.auto_left_stick.set_autopilot_position(None, None)
-                self.auto_left_stick.set_autopilot_active(False)
-                self.auto_right_stick.set_autopilot_position(None, None)
-                self.auto_right_stick.set_autopilot_active(False)
-
-            # Reset manual piloting tab stick displays as well
-            if hasattr(self, 'manual_left_stick') and hasattr(self, 'manual_right_stick'):
-                self.manual_left_stick.set_autopilot_position(None, None)
-                self.manual_left_stick.set_autopilot_active(False)
-                self.manual_right_stick.set_autopilot_position(None, None)
-                self.manual_right_stick.set_autopilot_active(False)
-
-            # Reset stick labels for both auto landing and manual piloting tabs
-            if hasattr(self, 'auto_left_stick_label'):
-                self.auto_left_stick_label.setText("R: 0, E: 0")
-            if hasattr(self, 'auto_right_stick_label'):
-                self.auto_right_stick_label.setText("A: 0, T: 0")
-            if hasattr(self, 'manual_left_stick_label'):
-                self.manual_left_stick_label.setText("R: 0, E: 0")
-            if hasattr(self, 'manual_right_stick_label'):
-                self.manual_right_stick_label.setText("A: 0, T: 0")
-
+            self.emergency_return_to_manual()
             # Update button text
             self.auto_landing_enable_button.setText("自動離着陸有効化")
 
@@ -3070,7 +3046,7 @@ class TelemetryApp(QMainWindow):
                     if distance_est is not None and distance_est > 0:
                         weight = marker_data['size']  # Larger markers get more weight
                         valid_estimates.append((distance_est, weight))
-                        print(f"Marker {marker_id}: distance {distance_est:.2f}m, weight {weight}")
+                        # print(f"Marker {marker_id}: distance {distance_est:.2f}m, weight {weight}")
                 except Exception as e:
                     print(f"Error estimating distance for marker {marker_id}: {e}")
                     continue
@@ -3084,7 +3060,7 @@ class TelemetryApp(QMainWindow):
 
         if total_weight > 0:
             weighted_average = total_weighted_distance / total_weight
-            print(f"Distance estimate: {len(valid_estimates)} markers, result: {weighted_average:.2f}m")
+            # print(f"Distance estimate: {len(valid_estimates)} markers, result: {weighted_average:.2f}m")
             return weighted_average
 
         return 0.0
@@ -3341,13 +3317,14 @@ class TelemetryApp(QMainWindow):
         rudder_rc = self.denormalize_symmetrical(target_rudder, 'rudd')
         throttle_rc = int(target_throttle)
 
-        # Send commands
+        # Send commands & print for debug
         commands = {
             'ail': aileron_rc,
             'elev': elevator_rc,
             'rudd': rudder_rc,
             'thro': throttle_rc
         }
+        print(f"[自動離着陸操縦量] AIL={aileron_rc}, ELEV={elevator_rc}, RUDD={rudder_rc}, THRO={throttle_rc}")
         self.send_serial_command(commands)
 
         # Update auto landing stick displays with actual sent RC values
@@ -3364,7 +3341,7 @@ class TelemetryApp(QMainWindow):
             self.auto_left_stick.set_autopilot_active(True)
 
             self.auto_right_stick.set_position(ail_norm, thr_norm)
-            self.auto_right_stick.set_autopilot_position(aileron_cmd, throttle_norm)
+            self.auto_right_stick.set_autopilot_position(aileron_cmd, thr_norm)
             self.auto_right_stick.set_autopilot_active(True)
 
         # Update manual piloting tab stick displays (same values as auto landing)
@@ -3395,6 +3372,34 @@ class TelemetryApp(QMainWindow):
             self.manual_left_stick_label.setText(f"R: {rudder_rc}, E: {elevator_rc}")
         if hasattr(self, 'manual_right_stick_label'):
             self.manual_right_stick_label.setText(f"A: {aileron_rc}, T: {throttle_rc}")
+
+        # Update main tab stick displays with auto landing commands
+        if hasattr(self, 'left_stick') and hasattr(self, 'right_stick'):
+            # Normalize actual RC values for main tab display
+            rud_norm = self.normalize_symmetrical(rudder_rc, **self.RC_RANGES['rudd'])
+            ele_norm = self.normalize_symmetrical(elevator_rc, **self.RC_RANGES['elev'])
+            ail_norm = self.normalize_symmetrical(aileron_rc, **self.RC_RANGES['ail'])
+            thr_norm = self.normalize_value(throttle_rc, **self.RC_RANGES['thro'])
+
+            self.left_stick.set_position(-rud_norm, -ele_norm)
+            self.left_stick.set_autopilot_position(target_rudder, elevator_cmd)
+            self.left_stick.set_autopilot_active(True)
+
+            self.right_stick.set_position(ail_norm, thr_norm)
+            self.right_stick.set_autopilot_position(aileron_cmd, (target_throttle - 400) / 600.0 - 1.0)
+            self.right_stick.set_autopilot_active(True)
+
+            # Update main tab stick labels
+            if hasattr(self, 'left_stick_label'):
+                self.left_stick_label.setText(f"R: {rudder_rc}, E: {elevator_rc}")
+            if hasattr(self, 'right_stick_label'):
+                self.right_stick_label.setText(f"A: {aileron_rc}, T: {throttle_rc}")
+
+        # Update current propeller input values with auto landing commands
+        self.current_ail = aileron_rc
+        self.current_elev = elevator_rc
+        self.current_rudd = rudder_rc
+        self.current_thro = throttle_rc
 
         # Update auto landing attitude displays
         if hasattr(self, 'auto_pitch_widget') and hasattr(self, 'auto_yaw_widget'):
@@ -4007,36 +4012,65 @@ class TelemetryApp(QMainWindow):
                 self.update_auto_landing_phase()
 
                 self.check_mission_triggers([aux1, aux2, aux3, aux4, aux5])
-                # --- 自動離着陸タブの表示を常時更新（AUX5 OFF/手動時も） ---
-                # 手動状態の自動操縦量・2D姿勢角度表示
-                if hasattr(self, 'auto_left_stick') and hasattr(self, 'auto_right_stick'):
-                    # プロポ入力値を正規化して表示
-                    rud_norm = self.normalize_symmetrical(float(rudd), **self.RC_RANGES['rudd'])
-                    ele_norm = self.normalize_symmetrical(float(elev), **self.RC_RANGES['elev'])
-                    rud_norm = -rud_norm
-                    ele_norm = -ele_norm
-                    ail_norm = self.normalize_symmetrical(float(ail), **self.RC_RANGES['ail'])
-                    thr_norm = self.normalize_value(float(thro), **self.RC_RANGES['thro'])
-                    self.auto_left_stick.set_position(rud_norm, ele_norm)
-                    self.auto_left_stick.set_autopilot_position(None, None)
-                    self.auto_left_stick.set_autopilot_active(False)
-                    self.auto_right_stick.set_position(ail_norm, thr_norm)
-                    self.auto_right_stick.set_autopilot_position(None, None)
-                    self.auto_right_stick.set_autopilot_active(False)
-                    if hasattr(self, 'auto_left_stick_label'):
-                        self.auto_left_stick_label.setText(f"R: {int(float(rudd))}, E: {int(float(elev))}")
-                    if hasattr(self, 'auto_right_stick_label'):
-                        self.auto_right_stick_label.setText(f"A: {int(float(ail))}, T: {int(float(thro))}")
+                # --- 自動離着陸タブの表示を更新 ---
+                if self.auto_landing_enabled and self.autopilot_active and self.active_mission_mode == 4:
+                    # 自動操縦量（送信RC値）を表示
+                    if hasattr(self, 'auto_left_stick') and hasattr(self, 'auto_right_stick'):
+                        rud_norm = self.normalize_symmetrical(self.current_rudd, **self.RC_RANGES['rudd'])
+                        ele_norm = self.normalize_symmetrical(self.current_elev, **self.RC_RANGES['elev'])
+                        rud_norm = -rud_norm
+                        ele_norm = -ele_norm
+                        ail_norm = self.normalize_symmetrical(self.current_ail, **self.RC_RANGES['ail'])
+                        thr_norm = self.normalize_value(self.current_thro, **self.RC_RANGES['thro'])
+                        self.auto_left_stick.set_position(rud_norm, ele_norm)
+                        self.auto_left_stick.set_autopilot_position(None, None)
+                        self.auto_left_stick.set_autopilot_active(True)
+                        self.auto_right_stick.set_position(ail_norm, thr_norm)
+                        self.auto_right_stick.set_autopilot_position(None, None)
+                        self.auto_right_stick.set_autopilot_active(True)
+                        if hasattr(self, 'auto_left_stick_label'):
+                            self.auto_left_stick_label.setText(f"R: {int(self.current_rudd)}, E: {int(self.current_elev)}")
+                        if hasattr(self, 'auto_right_stick_label'):
+                            self.auto_right_stick_label.setText(f"A: {int(self.current_ail)}, T: {int(self.current_thro)}")
 
-                # 2D姿勢角度パネルも常時更新
-                if hasattr(self, 'auto_pitch_widget') and hasattr(self, 'auto_yaw_widget'):
-                    roll = self.latest_attitude.get('roll', 0)
-                    pitch = self.latest_attitude.get('pitch', 0)
-                    yaw = self.latest_attitude.get('yaw', 0)
-                    self.auto_pitch_widget.set_angle(pitch)
-                    self.auto_yaw_widget.set_angle(yaw)
-                    self.auto_pitch_widget.set_autopilot_active(False)
-                    self.auto_yaw_widget.set_autopilot_active(False)
+                    # 2D姿勢角度パネルも自動操縦状態で更新
+                    if hasattr(self, 'auto_pitch_widget') and hasattr(self, 'auto_yaw_widget'):
+                        roll = self.latest_attitude.get('roll', 0)
+                        pitch = self.latest_attitude.get('pitch', 0)
+                        yaw = self.latest_attitude.get('yaw', 0)
+                        self.auto_pitch_widget.set_angle(pitch)
+                        self.auto_yaw_widget.set_angle(yaw)
+                        self.auto_pitch_widget.set_autopilot_active(True)
+                        self.auto_yaw_widget.set_autopilot_active(True)
+                else:
+                    # 手動状態の表示
+                    if hasattr(self, 'auto_left_stick') and hasattr(self, 'auto_right_stick'):
+                        rud_norm = self.normalize_symmetrical(float(rudd), **self.RC_RANGES['rudd'])
+                        ele_norm = self.normalize_symmetrical(float(elev), **self.RC_RANGES['elev'])
+                        rud_norm = -rud_norm
+                        ele_norm = -ele_norm
+                        ail_norm = self.normalize_symmetrical(float(ail), **self.RC_RANGES['ail'])
+                        thr_norm = self.normalize_value(float(thro), **self.RC_RANGES['thro'])
+                        self.auto_left_stick.set_position(rud_norm, ele_norm)
+                        self.auto_left_stick.set_autopilot_position(None, None)
+                        self.auto_left_stick.set_autopilot_active(False)
+                        self.auto_right_stick.set_position(ail_norm, thr_norm)
+                        self.auto_right_stick.set_autopilot_position(None, None)
+                        self.auto_right_stick.set_autopilot_active(False)
+                        if hasattr(self, 'auto_left_stick_label'):
+                            self.auto_left_stick_label.setText(f"R: {int(float(rudd))}, E: {int(float(elev))}")
+                        if hasattr(self, 'auto_right_stick_label'):
+                            self.auto_right_stick_label.setText(f"A: {int(float(ail))}, T: {int(float(thro))}")
+
+                    # 2D姿勢角度パネルも手動時のみ更新
+                    if hasattr(self, 'auto_pitch_widget') and hasattr(self, 'auto_yaw_widget'):
+                        roll = self.latest_attitude.get('roll', 0)
+                        pitch = self.latest_attitude.get('pitch', 0)
+                        yaw = self.latest_attitude.get('yaw', 0)
+                        self.auto_pitch_widget.set_angle(pitch)
+                        self.auto_yaw_widget.set_angle(yaw)
+                        self.auto_pitch_widget.set_autopilot_active(False)
+                        self.auto_yaw_widget.set_autopilot_active(False)
             else:
                 print(f"データ形式エラー: 25パラメータが必要ですが、{len(parts)}パラメータを受信しました - {line}")
         except (ValueError, IndexError) as e:
@@ -4124,8 +4158,8 @@ class TelemetryApp(QMainWindow):
                 self.record_auto_landing_log_data()
 
         # 既存のミッション処理（AUX2-4）
-        # 再現飛行中のみ他のミッションを無視、記録中や通常時は他のミッションも有効
-        if not (self.auto_landing_enabled and self.input_log_replaying):
+        # 再現飛行中や自動離着陸が有効な場合は他のミッションを無視
+        if not (self.auto_landing_enabled and self.input_log_replaying) and not (self.aux5_enabled and self.auto_landing_enabled):
             mission_found = False
             # Prioritize lower AUX numbers if multiple are on
             for aux_number in sorted(mission_map.keys()):
