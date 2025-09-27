@@ -531,11 +531,11 @@ class PositionVisualizationWidget(QWidget):
         self.setMinimumSize(400, 300)
         self.view_type = view_type  # "XY" or "ZY"
         self.aircraft_pos = {'x': 0.0, 'y': 0.0, 'z': 0.0}
-        # Default marker field positions (manual setting only, separate from image coordinates)
+        # Default marker field positions (will be loaded from marker_positions.txt)
         self.aruco_markers = {
-            1: {'x': -3.0, 'y': 6.0, 'z': 0.0, 'image_x': 0, 'image_y': 0, 'size': 0, 'detected': False},
-            2: {'x': 0.0, 'y': 0.0, 'z': 0.0, 'image_x': 0, 'image_y': 0, 'size': 0, 'detected': False},
-            3: {'x': 3.0, 'y': 6.0, 'z': 0.0, 'image_x': 0, 'image_y': 0, 'size': 0, 'detected': False}
+            1: {'x': -2.6, 'y': 7.7, 'z': 0.0, 'image_x': 0, 'image_y': 0, 'size': 0, 'detected': False},
+            2: {'x': 1.0, 'y': 0.0, 'z': 0.0, 'image_x': 0, 'image_y': 0, 'size': 0, 'detected': False},
+            3: {'x': 2.8, 'y': 16.76, 'z': 0.0, 'image_x': 0, 'image_y': 0, 'size': 0, 'detected': False}
         }
         self.scale = 10.0  # pixels per meter
 
@@ -1038,11 +1038,14 @@ class TelemetryApp(QMainWindow):
         self.latest_attitude = {'roll': 0, 'pitch': 0, 'yaw': 0, 'alt': 0}
 
         # --- ArUco Marker Data ---
+        # Initialize with default positions, then load from file
         self.aruco_markers = {
-            1: {'size': 0, 'id': 0, 'image_x': 0, 'image_y': 0, 'x': -3.0, 'y': 6.0, 'z': 0.0, 'detected': False},
-            2: {'size': 0, 'id': 0, 'image_x': 0, 'image_y': 0, 'x': 0.0, 'y': 0.0, 'z': 0.0, 'detected': False},
-            3: {'size': 0, 'id': 0, 'image_x': 0, 'image_y': 0, 'x': 3.0, 'y': 6.0, 'z': 0.0, 'detected': False}
+            1: {'size': 0, 'id': 0, 'image_x': 0, 'image_y': 0, 'x': -2.6, 'y': 7.7, 'z': 0.0, 'detected': False},
+            2: {'size': 0, 'id': 0, 'image_x': 0, 'image_y': 0, 'x': 1.0, 'y': 0.0, 'z': 0.0, 'detected': False},
+            3: {'size': 0, 'id': 0, 'image_x': 0, 'image_y': 0, 'x': 2.8, 'y': 16.76, 'z': 0.0, 'detected': False}
         }
+        # Load actual positions from marker_positions.txt
+        self.load_marker_positions()
 
         # --- ArUco Marker Calibration Data ---
         self.marker_calibrations = {
@@ -3005,7 +3008,7 @@ class TelemetryApp(QMainWindow):
             print(f"自動離着陸パラメータの保存中にエラーが発生しました: {e}")
 
     def estimate_distance_from_markers(self):
-        """Estimate distance using ArUco marker data with individual marker calibrations"""
+        """Estimate distance using the closest marker and add its Y coordinate"""
         valid_estimates = []
 
         # Check each marker and get individual distance estimates
@@ -3015,9 +3018,8 @@ class TelemetryApp(QMainWindow):
                     # Use individual marker distance estimation
                     distance_est = self.estimate_distance_from_marker(marker_id)
                     if distance_est is not None and distance_est > 0:
-                        weight = marker_data['size']  # Larger markers get more weight
-                        valid_estimates.append((distance_est, weight))
-                        # print(f"Marker {marker_id}: distance {distance_est:.2f}m, weight {weight}")
+                        valid_estimates.append((distance_est, marker_id))
+                        # print(f"Marker {marker_id}: distance {distance_est:.2f}m")
                 except Exception as e:
                     print(f"Error estimating distance for marker {marker_id}: {e}")
                     continue
@@ -3025,16 +3027,19 @@ class TelemetryApp(QMainWindow):
         if not valid_estimates:
             return 0.0
 
-        # Calculate weighted average distance
-        total_weighted_distance = sum(dist * weight for dist, weight in valid_estimates)
-        total_weight = sum(weight for _, weight in valid_estimates)
+        # Use the closest marker (minimum distance)
+        closest_distance, closest_marker_id = min(valid_estimates, key=lambda x: x[0])
 
-        if total_weight > 0:
-            weighted_average = total_weighted_distance / total_weight
-            # print(f"Distance estimate: {len(valid_estimates)} markers, result: {weighted_average:.2f}m")
-            return weighted_average
+        # Get the Y coordinate of the closest marker
+        marker_y_coord = 0.0
+        if closest_marker_id in self.aruco_markers:
+            marker_y_coord = self.aruco_markers[closest_marker_id].get('y', 0.0)
 
-        return 0.0
+        # Final distance = closest marker distance + marker Y coordinate
+        final_distance = closest_distance + marker_y_coord
+        print(f"Distance estimate: closest marker {closest_marker_id}, distance {closest_distance:.2f}m + Y{marker_y_coord:.2f}m = {final_distance:.2f}m")
+
+        return final_distance
 
     def interpolate_distance_from_size(self, size):
         """Linear interpolation using 3 calibration points"""
@@ -4687,6 +4692,39 @@ class TelemetryApp(QMainWindow):
             return conf['center_in'] + norm_val * (conf['max_in'] - conf['center_in'])
         else:
             return conf['center_in'] + norm_val * (conf['center_in'] - conf['min_in'])
+
+    def load_marker_positions(self):
+        """Load marker positions from marker_positions.txt file"""
+        try:
+            with open('marker_positions.txt', 'r') as f:
+                lines = f.readlines()
+
+            for line in lines:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+
+                # Parse format: marker_1_x = -2.6
+                if '=' in line:
+                    key, value = line.split('=', 1)
+                    key = key.strip()
+                    value = float(value.strip())
+
+                    # Extract marker ID and coordinate
+                    if key.startswith('marker_') and '_' in key[7:]:
+                        parts = key.split('_')
+                        if len(parts) >= 3:
+                            marker_id = int(parts[1])
+                            coord = parts[2]
+
+                            if marker_id in self.aruco_markers:
+                                self.aruco_markers[marker_id][coord] = value
+
+            print("マーカーポジションファイルを読み込みました")
+        except FileNotFoundError:
+            print("marker_positions.txt ファイルが見つかりません。デフォルト値を使用します")
+        except Exception as e:
+            print(f"マーカーポジション読み込みエラー: {e}")
 
     def update_marker_position_realtime(self, marker_id):
         """Update marker position in real-time as user types"""

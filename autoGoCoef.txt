@@ -1,15 +1,15 @@
 {
   "parameters": {
-    "takeoff_throttle": 1000.0,
-    "pre_drop_throttle": 800.0,
-    "post_drop_throttle": 650.0,
-    "steady_altitude": 1.5,
+    "takeoff_throttle": 1200.0,
+    "pre_drop_throttle": 650.0,
+    "post_drop_throttle": 600.0,
+    "steady_altitude": 1.1,
     "altitude_gain": 50.0,
     "rudder_gain": 0.5,
-    "takeoff_distance_threshold": 4.0,
-    "drop_distance_threshold": 3.5,
-    "steady_distance_threshold": 3.2,
-    "landing_distance_threshold": 3.0,
+    "takeoff_distance_threshold": 20.0,
+    "drop_distance_threshold": 15.0,
+    "steady_distance_threshold": 12.0,
+    "landing_distance_threshold": 5.0,
     "takeoff_elevator_offset": 10.0
   },
   "calibration": {

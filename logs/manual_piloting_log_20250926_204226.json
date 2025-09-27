@@ -1,0 +1,786 @@
+[
+  {
+    "timestamp": 1758886917.5263958,
+    "elapsed_time": 0.1153872013092041,
+    "altitude": 19.0,
+    "yaw": 0.0,
+    "throttle": 374,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886917.6499963,
+    "elapsed_time": 0.23898768424987793,
+    "altitude": 20.0,
+    "yaw": 0.0,
+    "throttle": 374,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886917.7769496,
+    "elapsed_time": 0.36594104766845703,
+    "altitude": 20.0,
+    "yaw": 0.0,
+    "throttle": 374,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886917.901038,
+    "elapsed_time": 0.49002933502197266,
+    "altitude": 20.0,
+    "yaw": 0.0,
+    "throttle": 374,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886918.0245957,
+    "elapsed_time": 0.6135871410369873,
+    "altitude": 20.0,
+    "yaw": 0.0,
+    "throttle": 374,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886918.1514916,
+    "elapsed_time": 0.7404830455780029,
+    "altitude": 20.0,
+    "yaw": 0.0,
+    "throttle": 374,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886918.274875,
+    "elapsed_time": 0.8638663291931152,
+    "altitude": 21.0,
+    "yaw": 0.0,
+    "throttle": 374,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886918.3968518,
+    "elapsed_time": 0.9858431816101074,
+    "altitude": 20.0,
+    "yaw": 0.0,
+    "throttle": 374,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886918.5228946,
+    "elapsed_time": 1.1118860244750977,
+    "altitude": 20.0,
+    "yaw": 0.0,
+    "throttle": 374,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886918.6597443,
+    "elapsed_time": 1.2487356662750244,
+    "altitude": 21.0,
+    "yaw": 0.0,
+    "throttle": 374,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886918.7864048,
+    "elapsed_time": 1.3753962516784668,
+    "altitude": 21.0,
+    "yaw": 0.0,
+    "throttle": 427,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886918.9089231,
+    "elapsed_time": 1.4979145526885986,
+    "altitude": 21.0,
+    "yaw": 0.0,
+    "throttle": 648,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886919.0302951,
+    "elapsed_time": 1.6192865371704102,
+    "altitude": 21.0,
+    "yaw": 0.0,
+    "throttle": 729,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886919.1519935,
+    "elapsed_time": 1.7409849166870117,
+    "altitude": 20.0,
+    "yaw": -0.060000000000002274,
+    "throttle": 774,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886919.2723105,
+    "elapsed_time": 1.8613018989562988,
+    "altitude": 20.0,
+    "yaw": 0.0,
+    "throttle": 776,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886919.4000351,
+    "elapsed_time": 1.9890265464782715,
+    "altitude": 25.0,
+    "yaw": 0.0,
+    "throttle": 867,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886919.5211093,
+    "elapsed_time": 2.110100746154785,
+    "altitude": 28.0,
+    "yaw": 0.17999999999999972,
+    "throttle": 864,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886919.6466453,
+    "elapsed_time": 2.2356367111206055,
+    "altitude": 27.0,
+    "yaw": 0.36999999999999744,
+    "throttle": 864,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886919.782277,
+    "elapsed_time": 2.3712685108184814,
+    "altitude": 28.0,
+    "yaw": 0.8699999999999974,
+    "throttle": 864,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886919.9028866,
+    "elapsed_time": 2.491878032684326,
+    "altitude": 28.0,
+    "yaw": 1.5,
+    "throttle": 867,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886920.0250983,
+    "elapsed_time": 2.6140897274017334,
+    "altitude": 27.0,
+    "yaw": 2.3699999999999974,
+    "throttle": 966,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886920.1477158,
+    "elapsed_time": 2.7367072105407715,
+    "altitude": 25.0,
+    "yaw": 3.6199999999999974,
+    "throttle": 956,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886920.2737124,
+    "elapsed_time": 2.862703800201416,
+    "altitude": 30.0,
+    "yaw": 5.119999999999997,
+    "throttle": 912,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886920.4001324,
+    "elapsed_time": 2.989123821258545,
+    "altitude": 29.0,
+    "yaw": 6.190000000000001,
+    "throttle": 912,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886920.5319397,
+    "elapsed_time": 3.1209311485290527,
+    "altitude": 34.0,
+    "yaw": 7.120000000000001,
+    "throttle": 912,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886920.6551762,
+    "elapsed_time": 3.2441675662994385,
+    "altitude": 49.0,
+    "yaw": 8.690000000000001,
+    "throttle": 912,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886920.7805371,
+    "elapsed_time": 3.3695285320281982,
+    "altitude": 107.0,
+    "yaw": 11.059999999999999,
+    "throttle": 912,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886920.9033272,
+    "elapsed_time": 3.492318630218506,
+    "altitude": 240.0,
+    "yaw": 13.559999999999999,
+    "throttle": 859,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886921.028646,
+    "elapsed_time": 3.6176373958587646,
+    "altitude": 457.0,
+    "yaw": 13.940000000000001,
+    "throttle": 859,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886921.1514554,
+    "elapsed_time": 3.7404468059539795,
+    "altitude": 695.0,
+    "yaw": 11.309999999999999,
+    "throttle": 859,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886921.2754898,
+    "elapsed_time": 3.864481210708618,
+    "altitude": 897.0,
+    "yaw": 7.309999999999999,
+    "throttle": 859,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886921.4126966,
+    "elapsed_time": 4.001688003540039,
+    "altitude": 1038.0,
+    "yaw": 5.18,
+    "throttle": 776,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886921.5213897,
+    "elapsed_time": 4.110381126403809,
+    "altitude": 1130.0,
+    "yaw": 7.7499999999999964,
+    "throttle": 704,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886921.656788,
+    "elapsed_time": 4.245779514312744,
+    "altitude": 1181.0,
+    "yaw": 9.120000000000001,
+    "throttle": 673,
+    "aux1": 1540
+  },
+  {
+    "timestamp": 1758886921.7834337,
+    "elapsed_time": 4.372425079345703,
+    "altitude": 1211.0,
+    "yaw": 8.499999999999996,
+    "throttle": 670,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886921.905722,
+    "elapsed_time": 4.494713306427002,
+    "altitude": 1208.0,
+    "yaw": 8.309999999999999,
+    "throttle": 670,
+    "aux1": 517
+  },
+  {
+    "timestamp": 1758886922.0311651,
+    "elapsed_time": 4.620156526565552,
+    "altitude": 1173.0,
+    "yaw": 5.559999999999999,
+    "throttle": 673,
+    "aux1": 517
+  },
+  {
+    "timestamp": 1758886922.1541889,
+    "elapsed_time": 4.743180274963379,
+    "altitude": 1122.0,
+    "yaw": 2.0,
+    "throttle": 673,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886922.2795734,
+    "elapsed_time": 4.86856484413147,
+    "altitude": 1045.0,
+    "yaw": -0.3200000000000003,
+    "throttle": 673,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886922.4051023,
+    "elapsed_time": 4.994093656539917,
+    "altitude": 889.0,
+    "yaw": 0.36999999999999744,
+    "throttle": 670,
+    "aux1": 517
+  },
+  {
+    "timestamp": 1758886922.528942,
+    "elapsed_time": 5.117933511734009,
+    "altitude": 741.0,
+    "yaw": 0.4299999999999997,
+    "throttle": 665,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886922.652439,
+    "elapsed_time": 5.2414305210113525,
+    "altitude": 595.0,
+    "yaw": -0.8800000000000026,
+    "throttle": 665,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886922.7787163,
+    "elapsed_time": 5.3677077293396,
+    "altitude": 425.0,
+    "yaw": 0.0,
+    "throttle": 617,
+    "aux1": 515
+  },
+  {
+    "timestamp": 1758886922.9029872,
+    "elapsed_time": 5.491978645324707,
+    "altitude": 325.0,
+    "yaw": 2.6799999999999997,
+    "throttle": 622,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886923.029015,
+    "elapsed_time": 5.618006467819214,
+    "altitude": 273.0,
+    "yaw": 6.7499999999999964,
+    "throttle": 512,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886923.153889,
+    "elapsed_time": 5.742880344390869,
+    "altitude": 328.0,
+    "yaw": 6.440000000000001,
+    "throttle": 513,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886923.2765,
+    "elapsed_time": 5.8654913902282715,
+    "altitude": 426.0,
+    "yaw": 4.939999999999998,
+    "throttle": 515,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886923.46049,
+    "elapsed_time": 6.049481391906738,
+    "altitude": 500.0,
+    "yaw": 4.059999999999999,
+    "throttle": 516,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886923.58411,
+    "elapsed_time": 6.173101425170898,
+    "altitude": 549.0,
+    "yaw": 2.8699999999999974,
+    "throttle": 516,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886923.722024,
+    "elapsed_time": 6.311015367507935,
+    "altitude": 554.0,
+    "yaw": 1.3699999999999974,
+    "throttle": 507,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886923.8448098,
+    "elapsed_time": 6.433801174163818,
+    "altitude": 506.0,
+    "yaw": 2.0599999999999987,
+    "throttle": 515,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886923.964598,
+    "elapsed_time": 6.553589344024658,
+    "altitude": 447.0,
+    "yaw": 3.5,
+    "throttle": 516,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886924.1490998,
+    "elapsed_time": 6.738091230392456,
+    "altitude": 420.0,
+    "yaw": 4.5,
+    "throttle": 516,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886924.2745872,
+    "elapsed_time": 6.86357855796814,
+    "altitude": 340.0,
+    "yaw": 8.499999999999996,
+    "throttle": 510,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886924.415273,
+    "elapsed_time": 7.0042643547058105,
+    "altitude": 311.0,
+    "yaw": 9.870000000000001,
+    "throttle": 510,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886924.5310292,
+    "elapsed_time": 7.120020627975464,
+    "altitude": 275.0,
+    "yaw": 10.440000000000001,
+    "throttle": 417,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886924.65527,
+    "elapsed_time": 7.2442615032196045,
+    "altitude": 234.0,
+    "yaw": 9.940000000000001,
+    "throttle": 420,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886924.7781353,
+    "elapsed_time": 7.367126703262329,
+    "altitude": 168.0,
+    "yaw": 9.309999999999999,
+    "throttle": 420,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886924.9004076,
+    "elapsed_time": 7.489398956298828,
+    "altitude": 130.0,
+    "yaw": 9.370000000000001,
+    "throttle": 424,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886925.0217888,
+    "elapsed_time": 7.610780239105225,
+    "altitude": 30.0,
+    "yaw": 9.940000000000001,
+    "throttle": 420,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886925.163945,
+    "elapsed_time": 7.752936363220215,
+    "altitude": 54.0,
+    "yaw": 10.440000000000001,
+    "throttle": 420,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886925.285671,
+    "elapsed_time": 7.874662399291992,
+    "altitude": 70.0,
+    "yaw": 11.749999999999996,
+    "throttle": 420,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886925.4074852,
+    "elapsed_time": 7.996476650238037,
+    "altitude": 62.0,
+    "yaw": 13.690000000000001,
+    "throttle": 420,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886925.5310109,
+    "elapsed_time": 8.120002269744873,
+    "altitude": 25.0,
+    "yaw": 15.309999999999999,
+    "throttle": 420,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886925.6525884,
+    "elapsed_time": 8.24157977104187,
+    "altitude": 30.0,
+    "yaw": 17.12,
+    "throttle": 420,
+    "aux1": 517
+  },
+  {
+    "timestamp": 1758886925.7774475,
+    "elapsed_time": 8.366438865661621,
+    "altitude": 14.0,
+    "yaw": 18.19,
+    "throttle": 420,
+    "aux1": 517
+  },
+  {
+    "timestamp": 1758886925.9003413,
+    "elapsed_time": 8.489332675933838,
+    "altitude": 15.0,
+    "yaw": 19.179999999999996,
+    "throttle": 417,
+    "aux1": 517
+  },
+  {
+    "timestamp": 1758886926.0236218,
+    "elapsed_time": 8.612613201141357,
+    "altitude": 16.0,
+    "yaw": 19.499999999999996,
+    "throttle": 417,
+    "aux1": 517
+  },
+  {
+    "timestamp": 1758886926.1461704,
+    "elapsed_time": 8.735161781311035,
+    "altitude": 13.0,
+    "yaw": 19.12,
+    "throttle": 417,
+    "aux1": 517
+  },
+  {
+    "timestamp": 1758886926.2817445,
+    "elapsed_time": 8.870735883712769,
+    "altitude": 20.0,
+    "yaw": 18.56,
+    "throttle": 417,
+    "aux1": 517
+  },
+  {
+    "timestamp": 1758886926.396054,
+    "elapsed_time": 8.985045433044434,
+    "altitude": 15.0,
+    "yaw": 17.929999999999996,
+    "throttle": 417,
+    "aux1": 517
+  },
+  {
+    "timestamp": 1758886926.5250516,
+    "elapsed_time": 9.11404299736023,
+    "altitude": 14.0,
+    "yaw": 17.06,
+    "throttle": 417,
+    "aux1": 517
+  },
+  {
+    "timestamp": 1758886926.6488895,
+    "elapsed_time": 9.237880945205688,
+    "altitude": 13.0,
+    "yaw": 16.37,
+    "throttle": 416,
+    "aux1": 517
+  },
+  {
+    "timestamp": 1758886926.7744267,
+    "elapsed_time": 9.363418102264404,
+    "altitude": 18.0,
+    "yaw": 16.06,
+    "throttle": 416,
+    "aux1": 517
+  },
+  {
+    "timestamp": 1758886926.89746,
+    "elapsed_time": 9.486451387405396,
+    "altitude": 11.0,
+    "yaw": 15.620000000000001,
+    "throttle": 416,
+    "aux1": 517
+  },
+  {
+    "timestamp": 1758886927.0351381,
+    "elapsed_time": 9.6241295337677,
+    "altitude": 15.0,
+    "yaw": 15.370000000000001,
+    "throttle": 416,
+    "aux1": 517
+  },
+  {
+    "timestamp": 1758886927.158827,
+    "elapsed_time": 9.74781847000122,
+    "altitude": 14.0,
+    "yaw": 15.249999999999996,
+    "throttle": 395,
+    "aux1": 517
+  },
+  {
+    "timestamp": 1758886927.284501,
+    "elapsed_time": 9.87349247932434,
+    "altitude": 18.0,
+    "yaw": 15.249999999999996,
+    "throttle": 388,
+    "aux1": 517
+  },
+  {
+    "timestamp": 1758886927.3967123,
+    "elapsed_time": 9.985703706741333,
+    "altitude": 14.0,
+    "yaw": 15.190000000000001,
+    "throttle": 388,
+    "aux1": 517
+  },
+  {
+    "timestamp": 1758886927.5343754,
+    "elapsed_time": 10.123366832733154,
+    "altitude": 17.0,
+    "yaw": 15.190000000000001,
+    "throttle": 385,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886927.6562748,
+    "elapsed_time": 10.245266199111938,
+    "altitude": 18.0,
+    "yaw": 15.190000000000001,
+    "throttle": 384,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886927.7795658,
+    "elapsed_time": 10.368557214736938,
+    "altitude": 17.0,
+    "yaw": 15.249999999999996,
+    "throttle": 379,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886927.9001644,
+    "elapsed_time": 10.489155769348145,
+    "altitude": 18.0,
+    "yaw": 15.249999999999996,
+    "throttle": 374,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886928.0233083,
+    "elapsed_time": 10.612299680709839,
+    "altitude": 18.0,
+    "yaw": 15.249999999999996,
+    "throttle": 374,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886928.1460025,
+    "elapsed_time": 10.734993934631348,
+    "altitude": 18.0,
+    "yaw": 15.249999999999996,
+    "throttle": 374,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886928.2842536,
+    "elapsed_time": 10.873245000839233,
+    "altitude": 17.0,
+    "yaw": 15.249999999999996,
+    "throttle": 374,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886928.4063365,
+    "elapsed_time": 10.995327949523926,
+    "altitude": 18.0,
+    "yaw": 15.249999999999996,
+    "throttle": 374,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886928.5308375,
+    "elapsed_time": 11.119828939437866,
+    "altitude": 18.0,
+    "yaw": 15.249999999999996,
+    "throttle": 374,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886928.6538832,
+    "elapsed_time": 11.24287462234497,
+    "altitude": 18.0,
+    "yaw": 15.190000000000001,
+    "throttle": 374,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886928.7792532,
+    "elapsed_time": 11.368244647979736,
+    "altitude": 17.0,
+    "yaw": 15.190000000000001,
+    "throttle": 374,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886928.9039981,
+    "elapsed_time": 11.492989540100098,
+    "altitude": 16.0,
+    "yaw": 15.190000000000001,
+    "throttle": 374,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886929.0281363,
+    "elapsed_time": 11.617127656936646,
+    "altitude": 17.0,
+    "yaw": 15.190000000000001,
+    "throttle": 374,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886929.1547964,
+    "elapsed_time": 11.74378776550293,
+    "altitude": 17.0,
+    "yaw": 15.190000000000001,
+    "throttle": 374,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886929.2792542,
+    "elapsed_time": 11.868245601654053,
+    "altitude": 16.0,
+    "yaw": 15.190000000000001,
+    "throttle": 374,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886929.4006534,
+    "elapsed_time": 11.989644765853882,
+    "altitude": 16.0,
+    "yaw": 15.190000000000001,
+    "throttle": 374,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886929.5263617,
+    "elapsed_time": 12.115353107452393,
+    "altitude": 16.0,
+    "yaw": 15.190000000000001,
+    "throttle": 374,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886929.6472933,
+    "elapsed_time": 12.236284732818604,
+    "altitude": 16.0,
+    "yaw": 15.190000000000001,
+    "throttle": 374,
+    "aux1": 516
+  },
+  {
+    "timestamp": 1758886929.7726953,
+    "elapsed_time": 12.361686706542969,
+    "altitude": 16.0,
+    "yaw": 15.190000000000001,
+    "throttle": 374,
+    "aux1": 516
+  }
+]
